@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>OrVexa</title>
+  <!-- Font Awesome Icons -->
+
+  <!-- ORVEXA FIREBASE -->
+  <script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore-compat.js"></script>
+    <link rel="stylesheet" href="styles.css"></head>
+<body>
+
+  <div class="app-container">
+    <div class="glow-bg"></div>
+
+    <!-- LOADING SCREEN -->
+    <div id="loading-screen">
+      <div class="spinner"></div>
+      <p style="font-size: 1em; color: #a1a1b5;" data-i18n="loading_text">Entering OrVexa...</p>
+    </div>
+
+    <!-- 1. LANDING PAGE -->
+    <div id="landing-screen" class="screen active">
+      <div></div>
+      <div class="landing-content">
+        <div class="logo-box"><i class="fa-solid fa-comment-dots"></i></div>
+        <p class="welcome-text" data-i18n="welcome_to">Welcome to</p>
+        <h1 class="app-name">OrVexa</h1>
+        <p class="app-desc" data-i18n="landing_desc">Connect with anyone,<br>anytime, anywhere.</p>
+      </div>
+      <div class="landing-bottom">
+        <button class="btn-primary" onclick="showScreen('signin-screen')" data-i18n="btn_signin">Sign In</button>
+        <button class="btn-secondary" onclick="showScreen('signup-screen')" data-i18n="btn_create_account">Create Account</button>
+      </div>
+    </div>
+
+    <!-- 2. SIGN IN -->
+    <div id="signin-screen" class="screen">
+      <div>
+        <button class="btn-back" onclick="showScreen('landing-screen')"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="form-header">
+          <h1 class="screen-title" data-i18n="signin_title">Sign In</h1>
+          <p class="subtitle" data-i18n="signin_subtitle">Welcome back! Please sign in<br>to continue.</p>
+        </div>
+        <form onsubmit="handleSignIn(event)">
+          <div class="form-group">
+            <label data-i18n="label_email_username">Email or Username</label>
+            <input type="text" id="signin-username" placeholder="Enter Email or Username" required>
+          </div>
+          <div class="form-group">
+            <label data-i18n="label_password">Password</label>
+            <div class="input-wrapper">
+              <input type="password" id="signin-pass" placeholder="Enter Password" required>
+              <i class="fa-regular fa-eye toggle-password" onclick="togglePassword('signin-pass', this)"></i>
+            </div>
+          </div>
+          <p id="signin-error" class="log-error" style="font-size:0.9em; margin-bottom:15px; display:none;"></p>
+          <div class="row-flex">
+            <label class="checkbox-container"><input type="checkbox" checked> <span data-i18n="remember_me">Remember me</span></label>
+            <a href="#" class="forgot-pass" data-i18n="forgot_pass">Forgot Password?</a>
+          </div>
+          <button type="submit" class="btn-primary" data-i18n="btn_signin">Sign In</button>
+        </form>
+        <div class="divider" data-i18n="or_continue">or continue with</div>
+        <div class="social-login">
+          <div class="social-btn"><i class="fa-brands fa-google" style="color: #ea4335;"></i></div>
+          <div class="social-btn"><i class="fa-brands fa-apple"></i></div>
+          <div class="social-btn"><i class="fa-brands fa-github"></i></div>
+        </div>
+      </div>
+      <p class="footer-text"><span data-i18n="no_account">Don't have an account?</span> <span onclick="showScreen('signup-screen')" data-i18n="btn_signup">Sign Up</span></p>
+    </div>
+
+    <!-- 3. SIGN UP -->
+    <div id="signup-screen" class="screen">
+      <div>
+        <button class="btn-back" onclick="showScreen('landing-screen')"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="form-header">
+          <h1 class="screen-title" data-i18n="signup_title">Sign Up</h1>
+          <p class="subtitle" data-i18n="signup_subtitle">Create your account<br>to get started.</p>
+        </div>
+        <form onsubmit="handleSignUp(event)">
+          <div class="form-group">
+            <label data-i18n="label_fullname">Full Name</label>
+            <input type="text" id="signup-fullname" placeholder="Danzz Studio" required>
+          </div>
+          <div class="form-group">
+            <label data-i18n="label_username">Username</label>
+            <input type="text" id="signup-username" placeholder="danzz.studio" required>
+          </div>
+          <div class="form-group">
+            <label data-i18n="label_email">Email</label>
+            <input type="email" id="signup-email" placeholder="danzz.studio@gmail.com" required>
+          </div>
+          <div class="form-group">
+            <label data-i18n="label_password">Password</label>
+            <div class="input-wrapper">
+              <input type="password" id="signup-pass" placeholder="Password" required>
+              <i class="fa-regular fa-eye toggle-password" onclick="togglePassword('signup-pass', this)"></i>
+            </div>
+          </div>
+          <div class="form-group">
+            <label data-i18n="label_confirm_pass">Confirm Password</label>
+            <div class="input-wrapper">
+              <input type="password" id="signup-confirm-pass" placeholder="Repeat Password" required>
+              <i class="fa-regular fa-eye toggle-password" onclick="togglePassword('signup-confirm-pass', this)"></i>
+            </div>
+          </div>
+          <p id="signup-error" class="log-error" style="font-size:0.9em; margin-bottom:15px; display:none;"></p>
+          <div class="row-flex" style="margin-bottom: 20px;">
+            <label class="checkbox-container"><input type="checkbox" checked required> <span data-i18n="agree_terms">I agree to Terms & Policy</span></label>
+          </div>
+          <button type="submit" class="btn-primary" data-i18n="btn_signup">Sign Up</button>
+        </form>
+      </div>
+      <p class="footer-text"><span data-i18n="has_account">Already have an account?</span> <span onclick="showScreen('signin-screen')" data-i18n="btn_signin">Sign In</span></p>
+    </div>
+
+    <!-- 4. DASHBOARD CHATS -->
+    <div id="dashboard-screen" class="screen">
+      <div>
+        <div class="dash-header">
+          <h1 class="dash-title" data-i18n="tab_chats">Chats</h1>
+          <div class="header-actions">
+            <button class="btn-add-user bell-wrap" onclick="openNotif()" title="Notifikasi"><i class="fa-solid fa-bell"></i><span class="bell-badge" id="bell-badge" style="display:none"></span></button>
+            <button class="btn-add-user" onclick="openSuggest()" title="Saran fitur"><i class="fa-solid fa-lightbulb"></i></button>
+            <button class="btn-add-user" onclick="openComplain()" title="Keluhan / bug"><i class="fa-solid fa-bug"></i></button>
+            <button class="btn-add-user" onclick="openAddUserModal()" title="Add User"><i class="fa-solid fa-user-plus"></i></button>
+          </div>
+        </div>
+
+        <div class="search-box">
+          <div class="search-input-wrapper">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="search-chat-input" placeholder="Search chats or users">
+          </div>
+        </div>
+
+        <!-- STORIES INSTAGRAM ROW -->
+        <div class="stories-container" id="stories-wrapper">
+          <div class="story-item" onclick="handleMyStoryClick()">
+            <div class="story-avatar-wrapper" id="my-story-avatar-wrapper">
+              <img src="https://api.dicebear.com/7.x/bottts/svg?seed=me" class="story-avatar" id="my-story-img">
+              <div class="add-story-btn" id="my-story-plus"><i class="fa-solid fa-plus"></i></div>
+            </div>
+            <span class="story-username" id="my-story-text" data-i18n="add_story">Add Story</span>
+          </div>
+
+          <div id="friends-stories" style="display: flex; gap: 15px;"></div>
+        </div>
+
+        <!-- DAFTAR CHAT -->
+        <div class="chats-list-title" data-i18n="recent_chats">Recent Chats</div>
+        <div class="chats-list" id="chats-list-wrapper"></div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD TAB: STORY -->
+    <div id="stories-tab-screen" class="screen">
+      <div>
+        <div class="dash-header">
+          <h1 class="dash-title" data-i18n="tab_stories">Stories</h1>
+        </div>
+        <div class="chats-list-title" data-i18n="your_story">Your Story</div>
+        <div class="stories-list-vertical">
+          <div class="story-card-item" onclick="handleMyStoryClick()">
+            <div class="story-avatar-wrapper" id="my-story-avatar-wrapper-tab">
+              <img src="https://api.dicebear.com/7.x/bottts/svg?seed=me" class="story-avatar" id="my-story-img-tab">
+              <div class="add-story-btn" id="my-story-plus-tab"><i class="fa-solid fa-plus"></i></div>
+            </div>
+            <div>
+              <strong style="color: var(--text-main); font-size: 1.05em;" id="my-story-text-tab">My Story</strong><br>
+              <span style="color: var(--text-muted); font-size: 0.85em;" data-i18n="story_tap_hint">Tap to view or add update</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chats-list-title" style="margin-top: 15px;" data-i18n="recent_updates">Recent Updates</div>
+        <div class="stories-list-vertical" id="stories-tab-vertical-list"></div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD TAB: GROUP -->
+    <div id="groups-tab-screen" class="screen">
+      <div>
+        <div class="dash-header">
+          <h1 class="dash-title" data-i18n="tab_groups">Groups</h1>
+        </div>
+        <div style="text-align: center; color: var(--text-muted); padding: 40px 20px;">
+          <i class="fa-solid fa-user-group" style="font-size: 3.5em; margin-bottom: 15px; color: var(--border-color);"></i>
+          <p style="font-size: 1em;" data-i18n="group_dev_msg">Group Chat feature is currently under development.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD TAB: MY PROFILE -->
+    <div id="settings-tab-screen" class="screen">
+      <div>
+        <div class="dash-header pf-header">
+          <h1 class="dash-title" data-i18n="my_profile">My Profile</h1>
+          <div class="pf-actions">
+            <button class="pf-icon-btn" onclick="openSheet('sheet-edit')" aria-label="Edit"><i class="fa-solid fa-pen"></i></button>
+            <button class="pf-icon-btn" onclick="openSheet('sheet-settings')" aria-label="Settings"><i class="fa-solid fa-gear"></i></button>
+          </div>
+        </div>
+
+        <div class="pf-me">
+          <img id="settings-user-avatar" src="" class="pf-avatar">
+          <div class="pf-who">
+            <div class="pf-name-row">
+              <h3 id="settings-user-name">Name</h3>
+              <i id="pf-verified" class="fa-solid fa-circle-check pf-verified" style="display:none"></i>
+              <span id="pf-role" class="pf-role" style="display:none">DEV</span>
+            </div>
+            <p id="settings-user-username">@username</p>
+            <p class="pf-bio" id="pf-bio"></p>
+          </div>
+        </div>
+
+        <div class="pf-stats">
+          <div><b id="st-story">0</b><span data-en="Active story" data-id="Story aktif">Active story</span></div>
+          <div><b id="st-contacts">0</b><span data-en="Contacts" data-id="Kontak">Contacts</span></div>
+          <div><b id="st-chats">0</b><span data-en="Chats" data-id="Chat">Chats</span></div>
+        </div>
+        <div class="pf-sec" data-en="My Story" data-id="Story Saya">My Story</div>
+        <div class="pf-story" id="pf-story" onclick="handleMyStoryClick()"></div>
+
+        <div class="pf-sec" data-i18n="sec_profile_link">Profile Link</div>
+        <div class="pf-list">
+          <div class="pf-item" onclick="copyText(this)"><span class="pf-tile"><i class="fa-solid fa-link"></i></span><div class="pf-txt"><b data-i18n="label_profile_link">Public Link</b><span class="pf-val" id="pf-link"></span></div><i class="fa-regular fa-copy pf-copy"></i></div>
+        </div>
+
+        <div class="pf-sec" data-i18n="sec_account_info">Account Info</div>
+        <div class="pf-list">
+          <div class="pf-item" onclick="copyText(this)"><span class="pf-tile"><i class="fa-solid fa-at"></i></span><div class="pf-txt"><b data-i18n="item_username">Username</b><span class="pf-val" id="pf-username"></span></div><i class="fa-regular fa-copy pf-copy"></i></div>
+          <div class="pf-item" onclick="copyText(this)"><span class="pf-tile"><i class="fa-solid fa-fingerprint"></i></span><div class="pf-txt"><b>OrVexa ID</b><span class="pf-val" id="pf-id"></span></div><i class="fa-regular fa-copy pf-copy"></i></div>
+          <div class="pf-item" style="cursor:default"><span class="pf-tile"><i class="fa-solid fa-calendar"></i></span><div class="pf-txt"><b data-en="Joined" data-id="Bergabung">Joined</b><span class="pf-val" id="pf-joined"></span></div></div>
+          <div class="pf-item" style="cursor:default"><span class="pf-tile"><i class="fa-solid fa-clock"></i></span><div class="pf-txt"><b>Status</b><span class="pf-val">Online</span></div></div>
+        </div>
+
+        <div class="pf-sec" data-en="Social Links" data-id="Tautan Sosmed">Social Links</div>
+        <div class="pf-list" id="pf-social"></div>
+
+        <div class="pf-sec" data-i18n="group_about">About</div>
+        <div class="pf-list">
+          <div class="pf-item" onclick="showScreen('about-screen')"><span class="pf-tile"><i class="fa-solid fa-circle-info"></i></span><div class="pf-txt"><b data-i18n="item_about">About OrVexa</b></div><i class="fa-solid fa-chevron-right pf-copy"></i></div>
+          <div class="pf-item" style="cursor:default"><span class="pf-tile"><i class="fa-solid fa-code-branch"></i></span><div class="pf-txt"><b data-i18n="item_version">Version</b><span class="pf-val" id="pf-version">v2.4.0</span></div></div>
+          <div class="pf-item" onclick="showScreen('license-screen')"><span class="pf-tile"><i class="fa-solid fa-file-contract"></i></span><div class="pf-txt"><b data-i18n="item_license">Open Source License</b></div><i class="fa-solid fa-chevron-right pf-copy"></i></div>
+        </div>
+
+        <div id="dev-settings-group" style="display:none">
+          <div class="pf-sec">Developer</div>
+          <div class="pf-list">
+            <div class="pf-item" onclick="openAdminPanel()"><span class="pf-tile"><i class="fa-solid fa-user-shield"></i></span><div class="pf-txt"><b>Admin Panel</b></div><i class="fa-solid fa-chevron-right pf-copy"></i></div>
+          </div>
+        </div>
+
+        <div style="padding:22px 20px 8px"><button class="sidebar-btn danger" style="width:100%;justify-content:center" onclick="handleLogOut()"><i class="fa-solid fa-right-from-bracket"></i> <span data-i18n="btn_logout">Log Out</span></button></div>
+      </div>
+    </div>
+
+    <!-- SHEET: EDIT (pensil) -->
+    <div class="sheet-overlay" id="sheet-edit" onclick="closeSheet(event)">
+      <div class="sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title" data-i18n="sheet_edit">Edit</div>
+        <div class="settings-card">
+          <div class="settings-item" onclick="closeSheet();openBio()"><div class="settings-item-left"><i class="fa-solid fa-text"></i> <span>Bio / Status</span></div><i class="fa-solid fa-chevron-right" style="font-size: 0.85em; color: var(--text-muted);"></i></div>
+          <div class="settings-item" onclick="closeSheet();openEditProfileModal()">
+                <div class="settings-item-left"><i class="fa-solid fa-user-pen"></i> <span data-i18n="item_edit_profile">Edit Profile</span></div>
+                <i class="fa-solid fa-chevron-right" style="font-size: 0.85em; color: var(--text-muted);"></i>
+              </div>
+          <div class="settings-item" onclick="closeSheet();openEditUsernameModal()">
+                <div class="settings-item-left"><i class="fa-solid fa-at"></i> <span data-i18n="item_username">Username</span></div>
+                <i class="fa-solid fa-chevron-right" style="font-size: 0.85em; color: var(--text-muted);"></i>
+              </div>
+          <div class="settings-item" onclick="closeSheet();triggerProfileChange()">
+                <div class="settings-item-left"><i class="fa-solid fa-camera"></i> <span data-i18n="item_change_photo">Change Profile Photo</span></div>
+                <i class="fa-solid fa-chevron-right" style="font-size: 0.85em; color: var(--text-muted);"></i>
+              </div>
+          <div class="settings-item" onclick="closeSheet();openSocial()">
+                <div class="settings-item-left"><i class="fa-solid fa-link"></i> <span data-en="Social Links" data-id="Tautan Sosmed">Social Links</span></div>
+                <i class="fa-solid fa-chevron-right" style="font-size: 0.85em; color: var(--text-muted);"></i>
+              </div>
+          <div class="settings-item" onclick="closeSheet();triggerGlobalWallpaperChange()">
+                <div class="settings-item-left"><i class="fa-solid fa-image"></i> <span data-i18n="item_wallpaper">Chat Wallpaper</span></div>
+                <i class="fa-solid fa-chevron-right" style="font-size: 0.85em; color: var(--text-muted);"></i>
+              </div>
+          <div class="settings-item" onclick="closeSheet();resetGlobalWallpaper()">
+                <div class="settings-item-left"><i class="fa-solid fa-rotate-left" style="color:#eab308;"></i> <span data-i18n="item_reset_wallpaper">Reset Wallpaper Default</span></div>
+                <i class="fa-solid fa-chevron-right" style="font-size: 0.85em; color: var(--text-muted);"></i>
+              </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SHEET: PENGATURAN (gear) -->
+    <div class="sheet-overlay" id="sheet-settings" onclick="closeSheet(event)">
+      <div class="sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title" data-i18n="tab_settings">Settings</div>
+
+        <div class="settings-group-title" data-i18n="group_appearance">Appearance</div>
+        <div class="settings-card">
+          <div class="settings-item">
+            <div class="settings-item-left"><i class="fa-solid fa-moon"></i> <span data-i18n="item_theme">Theme Mode</span></div>
+            <select id="theme-select" style="width: auto; padding: 6px 10px; font-size: 0.85em;" onchange="changeTheme(this.value)">
+              <option value="dark">Dark Mode</option>
+              <option value="light">Light Mode</option>
+              <option value="system">System Default</option>
+            </select>
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-left"><i class="fa-solid fa-palette"></i> <span data-i18n="item_accent">Accent Color</span></div>
+            <input type="color" id="accent-color-picker" value="#e5484d" style="width: 30px; height: 30px; padding: 0; border: none; background: transparent; cursor: pointer;" onchange="changeAccentColor(this.value)">
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-left"><i class="fa-solid fa-font"></i> <span data-i18n="item_font_size">Font Size</span></div>
+            <select id="font-size-select" style="width: auto; padding: 6px 10px; font-size: 0.85em;" onchange="changeFontSize(this.value)">
+              <option value="12px">Small</option>
+              <option value="14px" selected>Medium</option>
+              <option value="16px">Large</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-group-title" data-i18n="group_language">Language</div>
+        <div class="settings-card">
+          <div class="settings-item">
+            <div class="settings-item-left"><i class="fa-solid fa-globe"></i> <span data-i18n="item_app_language">App Language</span></div>
+            <select id="lang-select" style="width: auto; padding: 6px 10px; font-size: 0.85em;" onchange="changeLanguage(this.value)">
+              <option value="en" selected>English</option>
+              <option value="id">Indonesia</option>
+            </select>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- PAGE: INFO USERS -->
+    <div id="user-info-screen" class="screen">
+      <div class="ui-top">
+        <button class="btn-back" onclick="closeUserInfo()"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="ui-title">Info users</div>
+        <span></span>
+      </div>
+      <img id="ui-avatar" class="ui-avatar" src="">
+      <div class="ui-name-row"><h2 id="ui-name">Name</h2><i id="ui-verified" class="fa-solid fa-circle-check pf-verified" style="display:none"></i><span id="ui-role" class="pf-role" style="display:none">DEV</span></div>
+      <p class="ui-bio" id="ui-bio" style="display:none"></p>
+      <div class="ui-chip" onclick="copyPlain(this)"><span id="ui-username">@username</span><i class="fa-regular fa-copy"></i></div>
+      <div class="ui-link" id="ui-link" onclick="copyPlain(this)">orvexa.me/</div>
+      <div class="ui-actions">
+        <button class="ui-act main" onclick="closeUserInfo()"><span class="ui-act-ico"><i class="fa-solid fa-comment-dots"></i></span><span>Chat</span></button>
+        <button class="ui-act" id="ui-block-btn" onclick="toggleBlock()"><span class="ui-act-ico"><i id="ui-block-icon" class="fa-solid fa-user-slash"></i></span><span id="ui-block-label">Blokir</span></button>
+      </div>
+      <div class="pf-sec" data-en="Information" data-id="Informasi">Information</div>
+      <div class="pf-list">
+        <div class="pf-item" style="cursor:default"><span class="pf-tile"><i class="fa-solid fa-calendar"></i></span><div class="pf-txt"><b data-en="Joined" data-id="Bergabung">Joined</b><span class="pf-val" id="ui-joined"></span></div></div>
+        <div class="pf-item" style="cursor:default"><span class="pf-tile"><i class="fa-solid fa-clock"></i></span><div class="pf-txt"><b>Status</b><span class="pf-val" id="ui-status"></span></div></div>
+        <div class="pf-item" onclick="copyText(this)"><span class="pf-tile"><i class="fa-solid fa-fingerprint"></i></span><div class="pf-txt"><b>OrVexa ID</b><span class="pf-val" id="ui-id"></span></div><i class="fa-regular fa-copy pf-copy"></i></div>
+      </div>
+      <div class="pf-sec" id="ui-soc-sec" style="display:none" data-en="Social Links" data-id="Tautan Sosmed">Social Links</div>
+      <div class="pf-list" id="ui-social" style="display:none"></div>
+      <div class="pf-sec"><span style="text-transform:uppercase;letter-spacing:1.2px;font-weight:700" data-en="Shared Media" data-id="Media Bersama">Shared Media</span><span id="ui-media-count"></span></div>
+      <div class="ui-media" id="ui-media"></div>
+      <div class="ui-vns" id="ui-vns"></div>
+      <button class="ui-report" onclick="openReport()"><i class="fa-solid fa-flag"></i> <span data-en="Report user" data-id="Laporkan pengguna">Report user</span></button>
+    </div>
+
+    <!-- PAGE: ABOUT ORVEXA -->
+    <div id="about-screen" class="screen">
+      <div>
+        <button class="btn-back" onclick="switchTab('settings')"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="dash-header" style="padding:0; margin-bottom: 20px;">
+          <h1 class="dash-title">About OrVexa</h1>
+        </div>
+        <div class="page-content-box" id="about-page-content">
+          <!-- Dynamic Content Rendered By JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: OPEN SOURCE LICENSE -->
+    <div id="license-screen" class="screen">
+      <div>
+        <button class="btn-back" onclick="switchTab('settings')"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="dash-header" style="padding:0; margin-bottom: 20px;">
+          <h1 class="dash-title">Open Source License</h1>
+        </div>
+        <div class="page-content-box">
+          <div class="info-card">
+            <h3>MIT License</h3>
+            <p style="margin-bottom: 12px;">Copyright (c) 2026 OrVexa Team</p>
+            <p style="font-size: 0.88em; line-height: 1.6;">
+              Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+            </p>
+            <p style="font-size: 0.88em; line-height: 1.6; margin-top: 10px;">
+              The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+            </p>
+            <p style="font-size: 0.88em; line-height: 1.6; margin-top: 10px;">
+              THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+<div id="admin-screen" class="screen">
+  <div>
+    <div class="dash-header">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn-back" style="margin:0" onclick="switchTab('settings')"><i class="fa-solid fa-arrow-left"></i></button>
+        <h1 class="dash-title" style="font-size:1.4em">Admin Panel</h1>
+      </div>
+    </div>
+    <div class="adm-tabs" id="adm-tabs"></div>
+    <div class="adm-body" id="adm-body"></div>
+  </div>
+</div>
+
+    <!-- 5. RUANG CHAT -->
+    <div id="chat-room-screen" class="screen">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <button class="btn-back" style="margin:0;" onclick="switchTab('chats'); renderChatsList();">
+            <i class="fa-solid fa-arrow-left"></i>
+          </button>
+          <div class="chat-header-user" style="cursor:pointer" onclick="openUserInfo()">
+            <img id="active-chat-avatar" src="">
+            <div>
+              <div class="chat-header-name" id="active-chat-name">User</div>
+              <div class="user-status-text" id="active-chat-status">
+                <span class="status-dot"></span>
+                <span id="active-chat-status-text">Offline</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="chat-header-right"><i class="fa-solid fa-magnifying-glass" onclick="toggleChatSearch()"></i><i class="fa-solid fa-ellipsis-vertical" onclick="openSidebar()"></i></div>
+      </div>
+
+      <div class="chat-search-bar" id="chat-search-bar"><i class="fa-solid fa-magnifying-glass"></i><input type="text" id="chat-search-input" data-en="Search in chat..." data-id="Cari di chat..." placeholder="Search in chat..."></div>
+      <div class="pin-banner" id="pin-banner"><i class="fa-solid fa-thumbtack"></i><span id="pin-text"></span></div>
+      <div class="chat-messages-area" id="chat-messages-area"></div>
+
+      <!-- INPUT PESAN -->
+      <div class="chat-input-bar" id="chat-input-container">
+        <div class="composer-bar" id="composer-bar"></div>
+        <div class="msg-field" id="msg-field">
+          <button type="button" class="in-icon" onclick="comingSoon()" aria-label="Emoji"><i class="fa-regular fa-face-smile"></i></button>
+          <textarea id="chat-input" rows="1" placeholder="Type a message..." oninput="autoResizeTextarea(this)"></textarea>
+          <button type="button" class="in-icon" onclick="openSheet('sheet-attach')" aria-label="File"><i class="fa-solid fa-paperclip"></i></button>
+          <button type="button" class="in-icon" onclick="pickMedia('cam')" aria-label="Camera"><i class="fa-solid fa-camera"></i></button>
+        </div>
+        <div class="rec-field" id="rec-field" style="display:none">
+          <button type="button" class="in-icon" onclick="cancelVoice()" aria-label="Cancel"><i class="fa-solid fa-trash"></i></button>
+          <span class="rec-dot"></span><span id="rec-time">0:00</span>
+        </div>
+        <div class="blocked-bar" id="blocked-bar" style="display:none"><span id="blocked-text">Kamu memblokir kontak ini</span><button type="button" onclick="toggleBlock()" id="blocked-btn">Buka blokiran</button></div>
+        <button type="button" class="btn-action" id="chat-action-btn" onclick="chatAction()"><i class="fa-solid fa-microphone"></i></button>
+      </div>
+    </div>
+
+    <!-- BOTTOM NAVBAR -->
+    <div class="bottom-nav" id="main-bottom-nav" style="display: none;">
+      <button class="nav-item active" id="nav-chats" onclick="switchTab('chats')">
+        <i class="fa-solid fa-comment-dots"></i>
+        <span data-i18n="tab_chats">Chats</span>
+      </button>
+      <button class="nav-item" id="nav-stories" onclick="switchTab('stories')">
+        <i class="fa-solid fa-circle-notch"></i>
+        <span data-i18n="tab_stories">Story</span>
+      </button>
+      <button class="nav-item" id="nav-groups" onclick="switchTab('groups')">
+        <i class="fa-solid fa-user-group"></i>
+        <span data-i18n="tab_groups">Group</span>
+      </button>
+      <button class="nav-item" id="nav-settings" onclick="switchTab('settings')">
+        <i class="fa-solid fa-user"></i>
+        <span data-i18n="tab_profile">Profile</span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- SIDEBAR MENU TELEGRAM STYLE (LIQUID GLASS & VIEW PROFILE) -->
+  <!-- INPUT FILE TERSEMBUNYI -->
+  <input type="file" id="media-input" accept="image/*" style="display:none">
+  <input type="file" id="cam-input" accept="image/*" capture="environment" style="display:none">
+  <input type="file" id="sc-file" accept="image/*" style="display:none">
+
+  <!-- SHEET: MENU PESAN -->
+  <div class="sheet-overlay" id="sheet-msg" onclick="closeSheet(event)">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="mm-emojis" id="mm-emojis"></div>
+      <div class="settings-card" id="mm-actions"></div>
+    </div>
+  </div>
+
+  <!-- SHEET: LAMPIRAN -->
+  <div class="sheet-overlay" id="sheet-attach" onclick="closeSheet(event)">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" data-en="Attach" data-id="Lampirkan">Attach</div>
+      <div class="settings-card">
+        <div class="settings-item" onclick="pickMedia('media')"><div class="settings-item-left"><i class="fa-solid fa-image"></i> <span data-en="Photo" data-id="Foto">Photo</span></div></div>
+        <div class="settings-item" onclick="closeSheet();comingSoon()"><div class="settings-item-left"><i class="fa-solid fa-video"></i> <span data-en="Video (coming soon)" data-id="Video (segera hadir)">Video (coming soon)</span></div></div>
+        <div class="settings-item" onclick="closeSheet();comingSoon()"><div class="settings-item-left"><i class="fa-solid fa-file"></i> <span data-en="Document (coming soon)" data-id="Dokumen (segera hadir)">Document (coming soon)</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PREVIEW MEDIA -->
+  <div class="modal-overlay" id="media-preview">
+    <div class="modal-card">
+      <div class="mp-view" id="mp-view"></div>
+      <input type="text" id="mp-caption" data-en="Add a caption..." data-id="Tambah keterangan..." placeholder="Add a caption..." style="margin-top:12px">
+      <div class="mp-btns">
+        <button class="btn-secondary" onclick="cancelMedia()" data-en="Cancel" data-id="Batal">Cancel</button>
+        <button class="btn-primary" id="mp-send" onclick="sendMedia()" data-en="Send" data-id="Kirim">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: BUAT STORY -->
+  <div class="modal-overlay" id="story-compose">
+    <div class="modal-card">
+      <h3 class="modal-title" data-en="New Story" data-id="Story Baru">New Story</h3>
+      <div class="sc-tabs">
+        <button type="button" id="sc-tab-text" class="on" onclick="setStoryMode('text')" data-en="Text" data-id="Teks">Text</button>
+        <button type="button" id="sc-tab-media" onclick="setStoryMode('media')" data-en="Photo" data-id="Foto">Photo</button>
+        <button type="button" onclick="comingSoon()" data-en="Video (soon)" data-id="Video (segera)">Video (soon)</button>
+      </div>
+      <div id="sc-pane-text">
+        <textarea id="sc-text" class="sc-text" maxlength="300" rows="4" data-en="Write something..." data-id="Tulis sesuatu..." placeholder="Write something..."></textarea>
+        <div class="sc-bgs" id="sc-bgs"></div>
+      </div>
+      <div id="sc-pane-media" style="display:none">
+        <div class="sc-preview" id="sc-preview"></div>
+        <button type="button" class="btn-secondary" onclick="document.getElementById('sc-file').click()" data-en="Choose photo" data-id="Pilih foto">Choose photo</button>
+        <input type="text" id="sc-caption" data-en="Add a caption..." data-id="Tambah keterangan..." placeholder="Add a caption..." style="margin-top:10px">
+      </div>
+      <label class="sc-label" data-en="Who can view" data-id="Siapa yang bisa melihat">Who can view</label>
+      <select id="sc-privacy">
+        <option value="all" data-en="Everyone" data-id="Semua orang">Everyone</option>
+        <option value="friends" data-en="Contacts only" data-id="Hanya kontak">Contacts only</option>
+      </select>
+      <div class="mp-btns">
+        <button class="btn-secondary" onclick="closeStoryComposer()" data-en="Cancel" data-id="Batal">Cancel</button>
+        <button class="btn-primary" id="sc-post" onclick="postStory()" data-en="Post" data-id="Posting">Post</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHEET: NOTIFIKASI (UPDATE LOG) -->
+  <div class="sheet-overlay" id="sheet-notif" onclick="closeSheet(event)">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title" data-en="Notifications" data-id="Notifikasi">Notifications</div>
+      <div id="nf-follow" style="display:none"></div>
+      <div class="rp-label" data-en="Update log" data-id="Update log">Update log</div>
+      <div id="nf-list"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: SARAN FITUR -->
+  <div class="modal-overlay" id="suggest-modal">
+    <div class="modal-card">
+      <div class="rp-head">
+        <span class="rp-ico"><i class="fa-solid fa-lightbulb"></i></span>
+        <div>
+          <h3 class="modal-title" data-en="Suggest a Feature" data-id="Saran Fitur">Suggest a Feature</h3>
+          <p class="rp-sub" data-en="Tell us what OrVexa should have next." data-id="Ceritakan fitur yang kamu mau di OrVexa.">Tell us what OrVexa should have next.</p>
+        </div>
+      </div>
+      <div id="sg-closed" class="fx-note" style="display:none" data-en="The suggestion box is closed for now." data-id="Kotak saran sedang ditutup.">The suggestion box is closed for now.</div>
+      <div id="sg-form">
+        <textarea id="sg-text" class="fx-area" rows="4" maxlength="300" data-en="Your idea..." data-id="Idemu..." placeholder="Your idea..."></textarea>
+        <div class="rp-count" id="sg-count">0/300</div>
+      </div>
+      <div class="mp-btns">
+        <button class="btn-secondary" onclick="closeFx('suggest-modal')" data-en="Close" data-id="Tutup">Close</button>
+        <button class="btn-primary" id="sg-send" onclick="sendSuggest()" data-en="Send" data-id="Kirim">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: KELUHAN / BUG -->
+  <div class="modal-overlay" id="complain-modal">
+    <div class="modal-card">
+      <div class="rp-head">
+        <span class="rp-ico"><i class="fa-solid fa-bug"></i></span>
+        <div>
+          <h3 class="modal-title" data-en="Report a Problem" data-id="Laporkan Keluhan">Report a Problem</h3>
+          <p class="rp-sub" data-en="Found a bug? Tell us what happened." data-id="Nemu bug? Ceritakan apa yang terjadi.">Found a bug? Tell us what happened.</p>
+        </div>
+      </div>
+      <div class="sc-tabs" id="cp-types"></div>
+      <textarea id="cp-text" class="fx-area" rows="5" maxlength="500" data-en="What went wrong? What did you tap before it happened?" data-id="Apa yang salah? Apa yang kamu tekan sebelum itu terjadi?" placeholder="What went wrong?"></textarea>
+      <div class="rp-count" id="cp-count">0/500</div>
+      <p class="rp-sub" style="margin-top:6px" data-en="Device info is attached automatically." data-id="Info perangkat dilampirkan otomatis.">Device info is attached automatically.</p>
+      <div class="mp-btns">
+        <button class="btn-secondary" onclick="closeFx('complain-modal')" data-en="Cancel" data-id="Batal">Cancel</button>
+        <button class="btn-primary" onclick="sendComplain()" data-en="Send" data-id="Kirim">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: BIO -->
+  <div class="modal-overlay" id="bio-modal">
+    <div class="modal-card">
+      <h3 class="modal-title">Bio / Status</h3>
+      <div class="form-group"><input type="text" id="bio-input" maxlength="80" data-en="e.g. Available" data-id="mis. Tersedia" placeholder="e.g. Available"></div>
+      <div class="bio-chips">
+        <button type="button" onclick="setBioChip(this)">Available</button>
+        <button type="button" onclick="setBioChip(this)">Lagi sibuk</button>
+        <button type="button" onclick="setBioChip(this)">Busy</button>
+        <button type="button" onclick="setBioChip(this)">Offline dulu</button>
+      </div>
+      <div class="mp-btns">
+        <button class="btn-secondary" onclick="closeBio()" data-en="Cancel" data-id="Batal">Cancel</button>
+        <button class="btn-primary" onclick="saveBio()" data-en="Save" data-id="Simpan">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: LAPOR PENGGUNA -->
+  <div class="modal-overlay" id="report-modal">
+    <div class="modal-card">
+      <div class="rp-head">
+        <span class="rp-ico"><i class="fa-solid fa-flag"></i></span>
+        <div>
+          <h3 class="modal-title" data-en="Report User" data-id="Laporkan Pengguna">Report User</h3>
+          <p class="rp-sub" data-en="Reports are reviewed by admins." data-id="Laporan akan ditinjau oleh admin.">Reports are reviewed by admins.</p>
+        </div>
+      </div>
+      <div class="rp-user"><img id="rp-avatar" src=""><div><b id="rp-name"></b><span id="rp-username"></span></div></div>
+      <div class="rp-label" data-en="Reason" data-id="Alasan">Reason</div>
+      <div class="rp-select" id="rp-select">
+        <button type="button" class="rp-sel-btn" id="rp-sel-btn" onclick="toggleRpSelect()"><span id="rp-sel-text"></span><i class="fa-solid fa-chevron-right"></i></button>
+        <div class="rp-options" id="rp-reasons"></div>
+      </div>
+      <textarea id="rp-note" rows="3" maxlength="300" data-en="Details (optional)" data-id="Keterangan (opsional)" placeholder="Details (optional)"></textarea>
+      <div class="rp-count" id="rp-count">0/300</div>
+      <div class="mp-btns">
+        <button class="btn-secondary" onclick="closeReport()" data-en="Cancel" data-id="Batal">Cancel</button>
+        <button class="btn-primary" onclick="submitReport()" data-en="Send Report" data-id="Kirim Laporan">Send Report</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIGHTBOX -->
+  <div class="lb" id="lightbox" onclick="this.classList.remove('active')"><img id="lb-img" src=""></div>
+
+  <div class="sidebar-overlay" id="chat-sidebar" onclick="closeSidebar(event)">
+    <div class="sidebar-content">
+      <div class="sidebar-title" data-i18n="chat_options">Chat Options</div>
+      <div class="sidebar-menu">
+        <button class="sidebar-btn" onclick="clearChat()"><i class="fa-solid fa-broom"></i> <span data-i18n="opt_clear_chat">Clear Chat</span></button>
+        <button class="sidebar-btn" onclick="triggerChatWallpaperChange()"><i class="fa-solid fa-image"></i> <span data-i18n="opt_wallpaper_this">Wallpaper Chat Ini</span></button>
+        <button class="sidebar-btn danger" onclick="toggleBlock()"><i class="fa-solid fa-user-slash"></i> <span id="sidebar-block-label">Block User</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL ADD USER -->
+  <div class="modal-overlay" id="add-user-modal">
+    <div class="modal-card">
+      <h3 class="modal-title" data-i18n="modal_add_user">Add User</h3>
+      <div class="form-group">
+        <label data-i18n="modal_enter_username">Enter Username</label>
+        <input type="text" id="add-username-input" placeholder="e.g. alex_dev">
+      </div>
+      <button class="btn-primary" onclick="searchUser()" data-i18n="btn_search_user">Search User</button>
+      <div class="modal-log" id="modal-log"></div>
+      <button class="btn-secondary" style="margin-top: 10px;" onclick="closeAddUserModal()" data-i18n="btn_close">Close</button>
+    </div>
+  </div>
+
+  <!-- MODAL EDIT PROFILE -->
+  <div class="modal-overlay" id="edit-profile-modal">
+    <div class="modal-card">
+      <h3 class="modal-title" data-i18n="modal_edit_profile">Edit Profile</h3>
+      <div class="form-group">
+        <label data-i18n="label_fullname">Full Name</label>
+        <input type="text" id="edit-fullname-input">
+      </div>
+      <button class="btn-primary" onclick="saveProfileChanges()" data-i18n="btn_save_changes">Save Changes</button>
+      <button class="btn-secondary" style="margin-top: 10px;" onclick="closeEditProfileModal()" data-i18n="btn_cancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- MODAL EDIT USERNAME -->
+  <div class="modal-overlay" id="edit-username-modal">
+    <div class="modal-card">
+      <h3 class="modal-title" data-i18n="modal_edit_username">Edit Username</h3>
+      <div class="form-group">
+        <label data-i18n="modal_new_username">New Username</label>
+        <input type="text" id="edit-username-input">
+      </div>
+      <p id="edit-username-error" class="log-error" style="font-size:0.85em; margin-bottom:10px; display:none;"></p>
+      <button class="btn-primary" onclick="saveUsernameChanges()" data-i18n="btn_save_username">Save Username</button>
+      <button class="btn-secondary" style="margin-top: 10px;" onclick="closeEditUsernameModal()" data-i18n="btn_cancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- INPUT FILE TERSEBUNYI -->
+  <input type="file" id="story-file-input" accept="image/*" style="display: none;" onchange="uploadStory(event)">
+  <input type="file" id="chat-wp-file-input" accept="image/*" style="display: none;" onchange="uploadChatWallpaper(event)">
+  <input type="file" id="global-wp-file-input" accept="image/*" style="display: none;" onchange="uploadGlobalWallpaper(event)">
+  <input type="file" id="profile-file-input" accept="image/*" style="display: none;" onchange="uploadProfileAvatar(event)">
+
+  <!-- MODAL BUAT STORY (CAPTION) -->
+  <div class="modal-overlay" id="create-story-modal">
+    <div class="modal-card">
+      <h3 class="modal-title" data-i18n="modal_add_caption">Add Caption</h3>
+      <div style="text-align: center; margin-bottom: 12px;">
+        <img id="story-preview-img" style="max-width: 100%; max-height: 150px; border-radius: 10px;">
+      </div>
+      <div class="form-group">
+        <input type="text" id="story-caption-input" placeholder="Write a caption...">
+      </div>
+      <button class="btn-primary" onclick="submitStory()" data-i18n="btn_post_story">Post Story</button>
+    </div>
+  </div>
+
+  <!-- MODAL VIEW STORY -->
+  <div class="story-viewer-modal" id="story-viewer-modal">
+    <div class="story-view-header">
+      <div class="story-view-user">
+        <img id="view-story-avatar" src="">
+        <div class="story-user-meta">
+          <span class="story-view-username" id="view-story-username">Username</span>
+          <span class="story-timestamp" id="view-story-time">00:00</span>
+        </div>
+      </div>
+      <div class="story-header-actions">
+        <i class="fa-solid fa-trash-can btn-delete-story" id="btn-delete-story" onclick="deleteMyStory()" style="display:none;"></i>
+        <i class="fa-solid fa-xmark" style="font-size: 1.5em; cursor: pointer; color:#fff;" onclick="closeStoryViewer()"></i>
+      </div>
+    </div>
+
+    <div class="story-img-container" id="story-img-container">
+      <img id="view-story-image" src="">
+    </div>
+
+    <div class="story-caption-text" id="view-story-caption"></div>
+
+    <div class="story-footer-actions">
+      <div class="story-reply" id="story-reply-bar"><input type="text" id="story-reply-input" data-en="Reply to story..." data-id="Balas story..." placeholder="Reply to story..."><button type="button" onclick="sendStoryReply()"><i class="fa-solid fa-paper-plane"></i></button></div>
+      <!-- LIKE BAR -->
+      <div class="story-like-bar" id="story-like-bar" style="display:none;">
+        <button class="btn-story-like" id="btn-like-act" onclick="toggleLikeStory()">
+          <i class="fa-solid fa-heart" id="icon-like-act"></i>
+          <span id="text-like-act">Like</span>
+        </button>
+      </div>
+
+      <!-- VIEWERS BOX -->
+      <div class="story-viewers-box" id="story-viewers-box" style="display:none;">
+        <div class="story-viewers-title" id="viewers-count-title">Viewers (0)</div>
+        <div id="viewers-list"></div>
+      </div>
+    </div>
+  </div>
+
+    
+
+<div class="modal-overlay" id="adm-detail" onclick="if(event.target===this)admDetailClose()">
+  <div class="modal-card">
+    <div class="rp-head">
+      <span class="rp-ico"><i id="adm-d-ico" class="fa-solid fa-lightbulb"></i></span>
+      <div><h3 class="modal-title" id="adm-d-title"></h3><p class="rp-sub" id="adm-d-sub"></p></div>
+    </div>
+    <div class="adm-d-text" id="adm-d-text"></div>
+    <div class="adm-d-meta" id="adm-d-meta"></div>
+    <div class="mp-btns">
+      <button type="button" class="btn-secondary" onclick="admDetailClose()">Close</button>
+      <button type="button" class="btn-secondary" id="adm-d-done" onclick="admDetailAct('done')">Done</button>
+      <button type="button" class="btn-primary" style="background:#ef4444" onclick="admDetailAct('del')">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="sheet-social" onclick="closeSheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" data-en="Social Links" data-id="Tautan Sosmed">Social Links</div>
+    <div class="soc-field"><span class="pf-tile soc-tt"><i class="fa-brands fa-tiktok"></i></span><input type="text" id="soc-in-tiktok" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="80" placeholder="TikTok username"></div>
+    <div class="soc-field"><span class="pf-tile soc-ig"><i class="fa-brands fa-instagram"></i></span><input type="text" id="soc-in-instagram" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="80" placeholder="Instagram username"></div>
+    <div class="soc-field"><span class="pf-tile soc-wa"><i class="fa-brands fa-whatsapp"></i></span><input type="text" id="soc-in-whatsapp" autocomplete="off" inputmode="tel" maxlength="30" placeholder="WhatsApp: 62812xxxxxxx"></div>
+    <p class="soc-hint" data-en="Enter just the username (no @). For WhatsApp use the number with country code (62…). Anyone can see and tap these links. Leave blank to remove." data-id="Isi username saja (tanpa @). Untuk WhatsApp pakai nomor dengan kode negara (62…). Siapa pun bisa melihat dan mengetuk tautan ini. Kosongkan untuk menghapus.">Enter just the username (no @). For WhatsApp use the number with country code (62…). Anyone can see and tap these links. Leave blank to remove.</p>
+    <p class="soc-err" id="soc-err"></p>
+    <button type="button" class="btn-primary" onclick="saveSocial()" data-en="Save" data-id="Simpan">Save</button>
+  </div>
+</div>
+
+<div class="mt-banner" id="mt-banner" style="display:none">
+  <span class="mt-ico"><i class="fa-solid fa-screwdriver-wrench"></i></span>
+  <div><b id="mt-banner-ttl">Server maintenance</b><span id="mt-banner-msg"></span></div>
+</div>
+
+<!-- HALAMAN BAN -->
+<div id="ban-screen">
+  <div class="ban-ico"><i class="fa-solid fa-ban"></i></div>
+  <h1 id="ban-title"></h1>
+  <p class="ban-sub" id="ban-sub"></p>
+  <div class="ban-card" id="ban-card"></div>
+  <button type="button" class="btn-secondary" id="ban-out" style="margin-top:0"></button>
+</div>
+
+<!-- ADMIN: MODAL BAN -->
+<div class="modal-overlay" id="ban-modal" style="z-index:1250">
+  <div class="modal-card">
+    <div class="rp-head">
+      <span class="rp-ico"><i class="fa-solid fa-ban"></i></span>
+      <div><h3 class="modal-title">Ban account</h3><p class="rp-sub" id="bm-user"></p></div>
+    </div>
+    <div class="rp-label">Violation</div>
+    <div class="bio-chips" id="bm-types"></div>
+    <div class="rp-label" style="margin-top:14px">Duration</div>
+    <div class="bio-chips" id="bm-presets"></div>
+    <div class="bm-dur">
+      <input type="number" id="bm-num" min="1" max="3650" value="1">
+      <select id="bm-unit"><option value="h">Hours</option><option value="d" selected>Days</option><option value="p">Permanent</option></select>
+    </div>
+    <div class="rp-label" style="margin-top:14px">Note shown to the user (optional)</div>
+    <textarea id="bm-note" class="fx-area" rows="3" maxlength="200" placeholder="e.g. Sending spam to many users"></textarea>
+    <div class="mp-btns">
+      <button type="button" class="btn-secondary" onclick="document.getElementById('ban-modal').classList.remove('active')">Cancel</button>
+      <button type="button" class="btn-primary" style="background:#ef4444" onclick="confirmBan()">Ban account</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
