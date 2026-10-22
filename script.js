@@ -1900,4 +1900,1276 @@
       const d = raw[id], ls = d.lastSeen && d.lastSeen.toMillis ? d.lastSeen.toMillis() : 0;
       return { uid: id, name: d.name, username: d.username, email: d.email, avatar: hidden(d.username, id) ? NOAV : d.avatar, verified: !!d.verified, banned: !!d.banned, role: d.role || 'user', bio: d.bio || '', banner: d.banner || '', bpos: typeof d.bpos === 'number' ? d.bpos : 50, frame: d.frame || '', tiktok: d.tiktok || '', instagram: d.instagram || '', whatsapp: d.whatsapp || '', banReason: d.banReason || '', banAt: d.banAt || 0, banUntil: d.banUntil || 0, banNote: d.banNote || '', joinedAt: d.joinedAt || 0, lastSeen: ls, isOnline: !!d.isOnline && (id === uid || t - ls < 75000) };
     });
-    base.users = {}; list
+    base.users = {}; list.forEach(u => base.users[u.uid] = { ...u }); L('users', list);
+  }
+  function renderRoom(r) {
+    const msgs = (roomRaw[r] || []).filter(m => m.ts > (cleared[r] || 0));
+    const c = G('chatsDb', {}); c[r] = msgs; L('chatsDb', c);
+    base.chats[r] = {}; msgs.forEach(m => base.chats[r][m.id] = snap(m));
+  }
+  function applyRoom(r, s) {
+    roomRaw[r] = s.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).sort((a, b) => a.ts - b.ts);
+    renderRoom(r); roomReady[r] = true; refresh();
+  }
+  function syncRooms(list) {
+    const want = new Set(isDev() ? [] : list.map(f => ROOMS(me(), f)).concat('SYSTEM_' + me()));
+    Object.keys(roomUnsubs).forEach(r => { if (!want.has(r)) { roomUnsubs[r](); delete roomUnsubs[r]; } });
+    want.forEach(r => {
+      if (roomUnsubs[r]) return;
+      const other = r.startsWith('SYSTEM_') ? null : r.split('_vs_').find(x => x !== me());
+      const u1 = db.collection('chats').doc(r).collection('messages').onSnapshot(s => applyRoom(r, s), e => console.warn(r, e));
+      const u2 = other ? db.collection('chats').doc(r).onSnapshot(s => { const d = s.exists ? s.data() : {}; typing[r] = (d.typing && d.typing[other]) || 0; { const ac = G('acceptsDb', {}); if ((ac[r] || 0) !== (d.accepted || 0)) { ac[r] = d.accepted || 0; L('acceptsDb', ac); } } refresh(); if (typing[r]) setTimeout(refresh, 5200); }, () => {}) : () => {};
+      roomUnsubs[r] = () => { u1(); u2(); };
+    });
+  }
+  // privasi story: yang tidak boleh dilihat disaring dari cache (dan dari base agar tidak ikut terhapus)
+  function renderStories() {
+    const vis = {}, mine = me(), fr = base.friends;
+    Object.keys(storiesRaw).forEach(u => {
+      const st = storiesRaw[u];
+      if (isDev() || u === mine || st.privacy !== 'friends' || (fr[u] || []).includes(mine) || (fr[mine] || []).includes(u)) vis[u] = st;
+    });
+    base.stories = J(vis); L('storiesDb', vis);
+  }
+  function listen() {
+    const wait = [];
+    const on = (name, ref, fn) => {
+      let r; wait.push(new Promise(s => r = s));
+      unsubs.push(ref.onSnapshot(s => { fn(s); ready[name] = true; r(); refresh(); }, e => { console.warn(name, e); r(); }));
+    };
+    const map = fn => s => { const f = {}; s.forEach(d => f[d.id] = fn(d)); return f; };
+    on('users', db.collection('users'), s => {
+      raw = {}; s.forEach(d => raw[d.id] = d.data({ serverTimestamps: 'estimate' }));
+      if (!raw[uid]) { alert('Account removed.'); window.handleLogOut(); return; }
+      rebuildUsers(); currentUser = { ...currentUser, ...base.users[uid], uid }; L('currentUser', currentUser);
+      if (window.banCheck) window.banCheck();
+      const nc = raw[uid].cleared || {}; if (!same(nc, cleared)) { cleared = nc; Object.keys(roomRaw).forEach(renderRoom); }
+    });
+    on('friends', db.collection('friends'), s => { const f = map(d => d.data().list || [])(s); base.friends = J(f); L('friendsDb', f); syncRooms(f[me()] || []); if (ready.stories) renderStories(); });
+    on('blocks', db.collection('blocks'), s => { const f = map(d => d.data().list || [])(s); base.blocks = J(f); L('blocksDb', f); if (ready.users) rebuildUsers(); });
+    on('stories', db.collection('stories'), s => { storiesRaw = map(d => d.data())(s); renderStories(); });
+    on('updates', db.collection('updates'), s => { const a = []; s.forEach(d => a.push({ id: d.id, ...d.data() })); a.sort((x, y) => y.ts - x.ts); L('updatesDb', a); });
+    on('config', db.collection('config'), s => { const c = {}; s.forEach(d => c[d.id] = d.data()); L('configDb', c); });
+    if (isDev()) {
+      on('chats', db.collectionGroup('messages'), s => {
+        const c = {}; base.chats = {};
+        s.forEach(d => { const r = d.ref.parent.parent.id, m = { id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }; (c[r] = c[r] || []).push(m); (base.chats[r] = base.chats[r] || {})[d.id] = snap(m); });
+        Object.values(c).forEach(a => a.sort((x, y) => x.ts - y.ts)); L('chatsDb', c);
+      });
+      on('meta', db.collection('meta'), s => s.forEach(d => L(d.id, d.data().value)));
+      on('reports', db.collection('reports'), s => { const a = []; s.forEach(d => a.push({ id: d.id, ...d.data() })); a.sort((x, y) => y.ts - x.ts); L('reports', a); });
+      ['suggestions', 'complaints'].forEach(col => on(col, db.collection(col), s => { const a = []; s.forEach(d => a.push({ id: d.id, ...d.data() })); a.sort((x, y) => y.ts - x.ts); L(col + 'Db', a); }));
+    }
+    return Promise.race([Promise.all(wait), new Promise(r => setTimeout(r, 5000))]);
+  }
+
+  // ---------- SESSION, PRESENCE, AUTH ----------
+  const beat = on => { if (uid) q(() => db.collection('users').doc(uid).update({ isOnline: on, lastSeen: FV.serverTimestamp() })); };
+  function startSession(user) {
+    if (session && uid === user.uid) return session;
+    uid = user.uid;
+    const s = session = (async () => {
+      const snap = await db.collection('users').doc(user.uid).get();
+      if (!snap.exists) throw new Error('profile-missing');
+      const p = { uid: user.uid, ...snap.data() };
+      if ((G('currentUser', null) || {}).uid !== user.uid) clearCache();
+      currentUser = p; L('currentUser', p);
+      await listen(); beat(true);
+      if (!p.joinedAt) q(() => db.collection('users').doc(user.uid).update({ joinedAt: Date.parse(user.metadata.creationTime) || Date.now() }));
+      hb = setInterval(() => { if (!document.hidden) beat(true); }, 30000);
+      return p;
+    })();
+    s.catch(() => { if (session === s) { session = null; uid = null; } });
+    return s;
+  }
+  document.addEventListener('visibilitychange', () => beat(!document.hidden));
+  window.addEventListener('pagehide', () => beat(false));
+  setInterval(() => { if (uid && ready.users) { rebuildUsers(); refresh(); } }, 30000);
+
+  auth.onAuthStateChanged(async user => {
+    if (busy) return;
+    if (!user) {
+      resetState(); uid = null;
+      if (currentUser) { currentUser = null; localStorage.removeItem('orvexa_currentUser'); showScreen('landing-screen'); }
+      return;
+    }
+    try { await startSession(user); } catch (e) { console.warn('[OrVexa Firebase]', e); }
+  });
+
+  // Clear chat bersifat individu: hanya menyembunyikan pesan untuk akun ini (semua perangkatnya), lawan chat tidak terpengaruh.
+  window.clearChat = function () {
+    if (!confirm(currentLang === 'id' ? 'Bersihkan semua pesan di chat ini?' : 'Clear all messages in this chat?')) return;
+    const r = currentChatId(), ts = Date.now();
+    cleared[r] = ts; renderRoom(r);
+    if (uid) q(() => db.collection('users').doc(uid).update(new firebase.firestore.FieldPath('cleared', r), ts));
+    renderMessages(); closeSidebarDirect();
+  };
+
+  window.handleSignUp = async function (e) {
+    e.preventDefault();
+    const name = $('signup-fullname').value.trim(), username = $('signup-username').value.trim().toLowerCase(), email = $('signup-email').value.trim().toLowerCase();
+    const pass = $('signup-pass').value, err = $('signup-error'), id = currentLang === 'id';
+    const fail = m => { err.innerText = m; err.style.display = 'block'; };
+    if (pass !== $('signup-confirm-pass').value) return fail(id ? 'Konfirmasi Password tidak cocok!' : 'Password confirmation does not match!');
+    if (!NAME.test(username)) return fail(id ? 'Username hanya boleh huruf kecil, angka, titik, _ dan -' : 'Username may only contain lowercase letters, numbers, dot, _ and -');
+    err.style.display = 'none'; busy = true;
+    let cred;
+    try {
+      cred = await auth.createUserWithEmailAndPassword(email, pass);
+      const bt = db.batch();
+      bt.set(db.collection('usernames').doc(username), { uid: cred.user.uid, email });
+      bt.set(db.collection('users').doc(cred.user.uid), { name, username, email, avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + username, verified: false, banned: false, role: username === DEV ? 'admin' : 'user', isOnline: false, bio: '', joinedAt: Date.now() });
+      await bt.commit(); await auth.signOut(); busy = false;
+      alert(id ? 'Akun berhasil dibuat! Silakan Sign In.' : 'Account created successfully! Please Sign In.');
+      showScreen('signin-screen');
+    } catch (ex) {
+      busy = false;
+      if (cred) { try { await cred.user.delete(); } catch (_) {} }
+      fail(ex.code === 'auth/email-already-in-use' ? (id ? 'Email sudah terdaftar!' : 'Email already registered!') : ex.code === 'permission-denied' ? (id ? 'Username sudah terdaftar!' : 'Username already registered!') : (ex.message || 'Registration failed.'));
+    }
+  };
+
+  window.handleSignIn = async function (e) {
+    e.preventDefault();
+    const input = $('signin-username').value.trim().toLowerCase(), pass = $('signin-pass').value, err = $('signin-error'), id = currentLang === 'id';
+    const fail = m => { err.innerText = m; err.style.display = 'block'; };
+    const bad = id ? 'Akun tidak ditemukan atau password salah!' : 'Account not found or password incorrect!';
+    err.style.display = 'none';
+    try {
+      let email = input;
+      if (!input.includes('@')) { const u = await db.collection('usernames').doc(input).get(); if (!u.exists) return fail(bad); email = u.data().email; }
+      busy = true; const cred = await auth.signInWithEmailAndPassword(email, pass); busy = false;
+      await startSession(cred.user);
+      setUserStatus(currentUser.username, true);
+      $('loading-screen').style.display = 'flex';
+      setTimeout(() => { $('loading-screen').style.display = 'none'; switchTab('chats'); }, 1200);
+    } catch (ex) { busy = false; fail(ex.message === 'banned' ? 'This account has been banned.' : bad); }
+  };
+
+  window.handleLogOut = async function () {
+    clearInterval(hb);
+    if (uid) await q(() => db.collection('users').doc(uid).update({ isOnline: false, lastSeen: FV.serverTimestamp() }));
+    busy = true; resetState();
+    try { await auth.signOut(); } catch (_) {}
+    busy = false; uid = null; currentUser = null; localStorage.removeItem('orvexa_currentUser'); clearCache(); showScreen('landing-screen');
+  };
+})();
+
+/* ===== blok JS 5 ===== */
+/* ORVEXA UI: sheet profil, voice note, tombol coming soon */
+(function () {
+  const $ = id => document.getElementById(id), id = () => currentLang === 'id';
+  let rec = null, chunks = [], stream = null, t0 = 0, tick = null, cancelled = false;
+  window.openSheet = n => $(n).classList.add('active');
+  window.closeSheet = e => { if (e && e.target && !e.target.classList.contains('sheet-overlay')) return; document.querySelectorAll('.sheet-overlay').forEach(x => x.classList.remove('active')); };
+  window.comingSoon = () => alert(id() ? 'Segera hadir!' : 'Coming soon!');
+  window.copyText = row => { const t = row.querySelector('.pf-val').textContent, ic = row.querySelector('.pf-copy'); if (navigator.clipboard) navigator.clipboard.writeText(t).catch(() => {}); ic.className = 'fa-solid fa-check pf-copy'; setTimeout(() => ic.className = 'fa-regular fa-copy pf-copy', 1200); };
+
+  const _rst = renderSettingsTab;
+  renderSettingsTab = function () {
+    _rst();
+    if (!currentUser) return;
+    const u = getStoredData('users', []).find(x => x.username === currentUser.username) || currentUser;
+    $('pf-role').style.display = u.username === 'risky.err' ? 'inline-block' : 'none';
+    $('pf-verified').style.display = u.verified ? 'inline-block' : 'none';
+    $('pf-link').textContent = 'orvexa.me/' + u.username;
+    $('pf-username').textContent = u.username;
+    $('pf-id').textContent = currentUser.uid || u.uid || '-';
+  };
+
+  // ----- Info users & blokir -----
+  const T = (en, idn) => id() ? idn : en;
+  const target = () => (activeChatUser && !isSystemChat && activeChatUser.username) ? activeChatUser.username : null;
+  const iBlocked = () => { const t = target(); return !!t && !!currentUser && (getBlocks()[currentUser.username] || []).includes(t); };
+  window.fillUserInfo = function () {
+    const t = target(); if (!t) return;
+    const u = getStoredData('users', []).find(x => x.username === t) || activeChatUser, bl = iBlocked();
+    $('ui-avatar').src = u.avatar || activeChatUser.avatar; $('ui-name').textContent = u.name || t;
+    $('ui-verified').style.display = u.verified ? 'inline-block' : 'none';
+    $('ui-username').textContent = '@' + t; $('ui-link').textContent = 'orvexa.me/' + t;
+    $('ui-block-label').textContent = bl ? T('Unblock', 'Buka blokiran') : T('Block', 'Blokir');
+    $('ui-block-icon').className = 'fa-solid ' + (bl ? 'fa-user-check' : 'fa-user-slash');
+    $('ui-block-btn').classList.toggle('on', bl);
+  };
+  window.openUserInfo = () => { if (!target()) return; fillUserInfo(); showScreen('user-info-screen'); };
+  window.closeUserInfo = () => showScreen('chat-room-screen');
+  window.copyPlain = el => { const sp = el.querySelector('span'), t = (sp || el).textContent; if (navigator.clipboard) navigator.clipboard.writeText(t).catch(() => {}); };
+  window.toggleBlock = function () {
+    const t = target(); if (!t) return;
+    const b = getBlocks(), me = currentUser.username, list = b[me] || [];
+    if (list.includes(t)) b[me] = list.filter(x => x !== t);
+    else { if (!confirm(T('Block this user?', 'Blokir pengguna ini?'))) return; b[me] = list.concat(t); }
+    setStoredData('blocksDb', b);
+    closeSidebarDirect(); updateBlockUI();
+    if (document.getElementById('user-info-screen').classList.contains('active')) fillUserInfo();
+  };
+  function updateBlockUI() {
+    const bl = iBlocked(), ab = $('chat-action-btn');
+    $('blocked-bar').style.display = bl ? 'flex' : 'none';
+    $('blocked-text').textContent = T('You blocked this contact', 'Kamu memblokir kontak ini');
+    $('blocked-btn').textContent = T('Unblock', 'Buka blokiran');
+    if (bl) { $('msg-field').style.display = 'none'; $('rec-field').style.display = 'none'; ab.style.display = 'none'; }
+    else { ab.style.display = ''; if (!rec) $('msg-field').style.display = 'flex'; }
+    const lab = $('sidebar-block-label'); if (lab) lab.textContent = bl ? T('Unblock', 'Buka blokiran') : T('Block User', 'Blokir User');
+  }
+  const _rm = renderMessages;
+  renderMessages = function () { _rm(); updateBlockUI(); };
+
+  const _ar = autoResizeTextarea;
+  autoResizeTextarea = function (el) { _ar(el); syncActionBtn(); if (el.value && window.orvexaTyping) orvexaTyping(); };
+
+  
+  function syncActionBtn() {
+    if (rec) return;
+    const has = $('chat-input').value.trim().length > 0, b = $('chat-action-btn');
+    b.className = 'btn-action' + (has ? ' is-send' : '');
+    b.innerHTML = '<i class="fa-solid ' + (has ? 'fa-paper-plane' : 'fa-microphone') + '"></i>';
+  }
+  window.syncActionBtn = syncActionBtn;
+  window.chatAction = () => { if (rec) stopVoice(true); else if ($('chat-input').value.trim()) sendMessage(); else startVoice(); };
+  window.cancelVoice = () => stopVoice(false);
+
+  async function startVoice() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) return alert(id() ? 'Browser tidak mendukung rekam suara.' : 'Voice recording is not supported.');
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { return alert(id() ? 'Izin mikrofon ditolak.' : 'Microphone permission denied.'); }
+    const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(m => MediaRecorder.isTypeSupported(m));
+    chunks = []; cancelled = false;
+    rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 16000 } : { audioBitsPerSecond: 16000 });
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = onStop; rec.start(); t0 = Date.now();
+    $('msg-field').style.display = 'none'; $('rec-field').style.display = 'flex';
+    const b = $('chat-action-btn'); b.className = 'btn-action is-send'; b.innerHTML = '<i class="fa-solid fa-paper-plane"></i>';
+    $('rec-time').textContent = '0:00';
+    tick = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); $('rec-time').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); if (s >= 60) stopVoice(true); }, 250);
+  }
+  function stopVoice(send) { cancelled = !send; clearInterval(tick); if (rec && rec.state !== 'inactive') rec.stop(); }
+  function onStop() {
+    const dur = Math.round((Date.now() - t0) / 1000), type = (rec.mimeType || 'audio/webm').split(';')[0];
+    stream.getTracks().forEach(t => t.stop()); rec = null;
+    $('rec-field').style.display = 'none'; $('msg-field').style.display = 'flex'; syncActionBtn();
+    if (cancelled || dur < 1) return;
+    const r = new FileReader(); r.onload = () => sendVoiceNote(r.result, dur); r.readAsDataURL(new Blob(chunks, { type }));
+  }
+
+  // pesan suara dikirim lewat fungsi kirim yang sama dengan pesan lain
+  function sendVoiceNote(data, dur) { sendRich({ text: '', audio: data, dur }); }
+})();
+
+/* ===== blok JS 6 ===== */
+/* ORVEXA FEATURES: chat lanjutan, media, story, profil, laporan */
+(function () {
+  const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
+  const open = n => $(n).classList.add('active'), shut = n => $(n).classList.remove('active');
+  const chatTarget = () => (activeChatUser && !isSystemChat && activeChatUser.username) ? activeChatUser.username : null;
+  const me = () => currentUser.username;
+  const userOf = n => G('users', []).find(x => x.username === n);
+
+  // ---------- teks dua bahasa untuk elemen statis ----------
+  function applyFx() {
+    document.querySelectorAll('[data-en]').forEach(el => {
+      const v = el.getAttribute(currentLang === 'id' ? 'data-id' : 'data-en');
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.placeholder = v; else el.textContent = v;
+    });
+  }
+  const _cl = changeLanguage;
+  changeLanguage = function (v) { _cl(v); applyFx(); };
+  applyFx();
+
+  let tt = null;
+  function toast(msg) {
+    let t = $('toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 2000);
+  }
+  window.toast = toast;
+
+  const fmtJoined = ms => ms ? tr('Joined ', 'Bergabung sejak ') + new Date(ms).toLocaleDateString(currentLang === 'id' ? 'id-ID' : 'en-US', { month: 'short', year: 'numeric' }) : '-';
+  const fmtSeen = ms => { const d = new Date(ms), t = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); return new Date().toDateString() === d.toDateString() ? tr('today at ', 'hari ini ') + t : d.toLocaleDateString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: 'numeric', month: 'short' }) + ' ' + t; };
+
+  // ---------- menu pesan: reaksi, balas, salin, pin, edit, hapus ----------
+  const EMO = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  let menuId = null;
+  const msgs = () => { chatsDb = G('chatsDb', {}); return chatsDb[currentChatId()] || []; };
+  const find = id => msgs().find(m => m.id === id);
+  const save = () => { setStoredData('chatsDb', chatsDb); renderMessages(); };
+
+  function showMenu(id) {
+    const m = find(id); if (!m) return; menuId = id;
+    const mine = m.sender === me(), ok = !m.deleted;
+    $('mm-emojis').innerHTML = ok ? EMO.map(e => `<button data-emo="${e}" class="${(m.reactions || {})[me()] === e ? 'on' : ''}">${e}</button>`).join('') : '';
+    const a = [];
+    if (ok) a.push(['reply', 'fa-reply', tr('Reply', 'Balas')]);
+    if (ok && m.text) a.push(['copy', 'fa-copy', tr('Copy', 'Salin')]);
+    if (ok) a.push(['pin', 'fa-thumbtack', m.pinned ? tr('Unpin', 'Lepas pin') : tr('Pin message', 'Pin pesan')]);
+    if (ok && mine && m.text && !m.audio && !m.media) a.push(['edit', 'fa-pen', tr('Edit', 'Edit')]);
+    if (ok && mine) a.push(['del', 'fa-trash', tr('Delete for everyone', 'Hapus untuk semua')]);
+    $('mm-actions').innerHTML = a.map(x => `<div class="settings-item" data-act="${x[0]}"><div class="settings-item-left"><i class="fa-solid ${x[1]}"></i> <span>${x[2]}</span></div></div>`).join('');
+    open('sheet-msg');
+  }
+  $('sheet-msg').addEventListener('click', e => {
+    const em = e.target.closest('[data-emo]'), ac = e.target.closest('[data-act]');
+    if (em) react(em.dataset.emo); else if (ac) act(ac.dataset.act);
+  });
+  function react(e) {
+    const m = find(menuId); if (!m) return;
+    m.reactions = m.reactions || {};
+    if (m.reactions[me()] === e) delete m.reactions[me()]; else m.reactions[me()] = e;
+    closeSheet(); save();
+  }
+  function act(a) {
+    const m = find(menuId); if (!m) return; closeSheet();
+    if (a === 'reply') { pendingReply = { id: m.id, sender: m.sender, text: previewOf(m).slice(0, 80) }; editingId = null; syncComposer(); $('chat-input').focus(); }
+    else if (a === 'copy') { if (navigator.clipboard) navigator.clipboard.writeText(m.text).catch(() => {}); }
+    else if (a === 'pin') { m.pinned = !m.pinned; save(); }
+    else if (a === 'edit') { editingId = m.id; pendingReply = null; const i = $('chat-input'); i.value = m.text; autoResizeTextarea(i); syncComposer(); i.focus(); }
+    else if (a === 'del') {
+      if (!confirm(tr('Delete this message for everyone?', 'Hapus pesan ini untuk semua orang?'))) return;
+      m.deleted = true; m.text = ''; m.pinned = false; delete m.audio; delete m.media; delete m.dur; delete m.replyTo; save();
+    }
+  }
+  window.syncComposer = function () {
+    const b = $('composer-bar');
+    if (editingId) { b.style.display = 'flex'; b.innerHTML = `<i class="fa-solid fa-pen"></i><div class="cb-txt"><b>${tr('Edit message', 'Edit pesan')}</b></div><button type="button" onclick="cancelComposer()"><i class="fa-solid fa-xmark"></i></button>`; }
+    else if (pendingReply) { b.style.display = 'flex'; b.innerHTML = `<i class="fa-solid fa-reply"></i><div class="cb-txt"><b>${esc(pendingReply.sender === me() ? tr('You', 'Kamu') : pendingReply.sender)}</b><span>${esc(pendingReply.text)}</span></div><button type="button" onclick="cancelComposer()"><i class="fa-solid fa-xmark"></i></button>`; }
+    else b.style.display = 'none';
+  };
+  window.cancelComposer = () => { pendingReply = null; if (editingId) { editingId = null; $('chat-input').value = ''; autoResizeTextarea($('chat-input')); } syncComposer(); };
+
+  const area = $('chat-messages-area');
+  let lp = null, fired = false;
+  area.addEventListener('pointerdown', e => {
+    const row = e.target.closest('.message-row'); if (!row || !row.dataset.id) return;
+    fired = false; clearTimeout(lp); lp = setTimeout(() => { fired = true; showMenu(row.dataset.id); }, 450);
+  });
+  ['pointerup', 'pointercancel', 'scroll'].forEach(ev => area.addEventListener(ev, () => clearTimeout(lp)));
+  area.addEventListener('contextmenu', e => e.preventDefault());
+  function goto(id) {
+    if (!id) return;
+    const el = area.querySelector(`.message-row[data-id="${CSS.escape(id)}"]`);
+    if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1200); }
+  }
+  area.addEventListener('click', e => {
+    if (fired) { fired = false; return; }
+    const row = e.target.closest('.message-row'); if (!row) return;
+    const q = e.target.closest('.msg-quote'); if (q) return goto(q.dataset.goto);
+    const im = e.target.closest('.msg-img'); if (im) return lightbox(im.src);
+    if (e.target.closest('audio,video,a')) return;
+    if (row.dataset.id) showMenu(row.dataset.id);
+  });
+  $('pin-banner').onclick = () => goto($('pin-banner').dataset.id);
+  window.lightbox = url => { $('lb-img').src = url; open('lightbox'); };
+
+  // ---------- cari di chat ----------
+  window.toggleChatSearch = function () {
+    const b = $('chat-search-bar'), on = b.style.display !== 'flex';
+    b.style.display = on ? 'flex' : 'none';
+    if (on) $('chat-search-input').focus(); else { chatSearchQuery = ''; $('chat-search-input').value = ''; renderMessages(); }
+  };
+  $('chat-search-input').addEventListener('input', e => { chatSearchQuery = e.target.value; renderMessages(); });
+
+  // ---------- kirim foto, video, dokumen ----------
+  // Foto dikecilkan lalu disimpan langsung di Firestore (tanpa Firebase Storage)
+  function imgData(file, max, q) {
+    return new Promise((res, rej) => {
+      const im = new Image(), u = URL.createObjectURL(file);
+      im.onload = () => {
+        URL.revokeObjectURL(u);
+        let m = max, ql = q, out = '';
+        for (let i = 0; i < 8; i++) {
+          const r = Math.min(1, m / Math.max(im.width, im.height)), c = document.createElement('canvas');
+          c.width = Math.round(im.width * r); c.height = Math.round(im.height * r);
+          c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+          out = c.toDataURL('image/jpeg', ql);
+          if (out.length < 120000) break;
+          if (ql > 0.5) ql -= 0.1; else m = Math.round(m * 0.8);
+        }
+        out.length < 400000 ? res(out) : rej(new Error('too big'));
+      };
+      im.onerror = rej; im.src = u;
+    });
+  }
+  const failMsg = () => alert(tr('Could not process this photo.', 'Foto tidak bisa diproses.'));
+
+  let pend = null;
+  window.pickMedia = kind => { closeSheet(); $(kind === 'cam' ? 'cam-input' : 'media-input').click(); };
+  ['media-input', 'cam-input'].forEach(id => $(id).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) preview(f); }));
+  function preview(f) {
+    if (!chatTarget()) return;
+    if (!f.type.startsWith('image/')) { comingSoon(); return; }
+    const url = URL.createObjectURL(f); pend = { file: f, url };
+    $('mp-view').innerHTML = `<img src="${url}">`;
+    $('mp-caption').value = ''; $('mp-send').disabled = false; open('media-preview');
+  }
+  window.cancelMedia = () => { if (pend) URL.revokeObjectURL(pend.url); pend = null; shut('media-preview'); $('mp-view').innerHTML = ''; };
+  window.sendMedia = async function () {
+    if (!pend) return; const btn = $('mp-send'); btn.disabled = true;
+    try {
+      const url = await imgData(pend.file, 800, 0.7);
+      sendRich({ text: $('mp-caption').value.trim(), media: { type: 'image', url, name: pend.file.name, size: Math.round(url.length * 0.75) } });
+      cancelMedia();
+    } catch (e) { console.warn(e); failMsg(); btn.disabled = false; }
+  };
+
+  // ---------- story: teks, foto, video, privasi ----------
+  const BGS = ['#e5484d', '#3b82f6', '#16a34a', '#a855f7', '#f59e0b', '#111827'];
+  let sc = { mode: 'text', file: null, bg: BGS[0] };
+  $('sc-bgs').innerHTML = BGS.map((c, i) => `<button type="button" class="${i ? '' : 'on'}" style="background:${c}" data-bg="${c}"></button>`).join('');
+  $('sc-bgs').addEventListener('click', e => { const b = e.target.closest('[data-bg]'); if (!b) return; sc.bg = b.dataset.bg; $('sc-bgs').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); $('sc-text').style.background = sc.bg; });
+  window.setStoryMode = m => {
+    sc.mode = m; $('sc-pane-text').style.display = m === 'text' ? 'block' : 'none'; $('sc-pane-media').style.display = m === 'media' ? 'block' : 'none';
+    $('sc-tab-text').classList.toggle('on', m === 'text'); $('sc-tab-media').classList.toggle('on', m === 'media');
+  };
+  window.openStoryComposer = () => {
+    sc.file = null; $('sc-text').value = ''; $('sc-text').style.background = sc.bg; $('sc-caption').value = ''; $('sc-preview').innerHTML = '';
+    $('sc-post').disabled = false; $('sc-privacy').value = localStorage.getItem('orvexa_storyPrivacy') || 'all';
+    setStoryMode('text'); open('story-compose');
+  };
+  window.closeStoryComposer = () => shut('story-compose');
+  window.handleMyStoryClick = function () {
+    storiesDb = G('storiesDb', {});
+    if (storiesDb[currentUser.username]) openStoryViewer(currentUser.username); else openStoryComposer();
+  };
+  $('sc-file').addEventListener('change', e => {
+    const fl = e.target.files[0]; e.target.value = ''; if (!fl) return;
+    if (!fl.type.startsWith('image/')) return comingSoon();
+    sc.file = fl; $('sc-preview').innerHTML = `<img src="${URL.createObjectURL(fl)}">`;
+  });
+  window.postStory = async function () {
+    const btn = $('sc-post'), privacy = $('sc-privacy').value; btn.disabled = true;
+    localStorage.setItem('orvexa_storyPrivacy', privacy);
+    const n = new Date(), time = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0');
+    const st = { img: '', caption: '', time, createdAt: Date.now(), views: [], likes: [], privacy };
+    try {
+      if (sc.mode === 'text') {
+        const t = $('sc-text').value.trim(); if (!t) { btn.disabled = false; return; }
+        st.type = 'text'; st.text = t.slice(0, 300); st.bg = sc.bg;
+      } else {
+        if (!sc.file) { btn.disabled = false; return; }
+        st.type = 'image'; st.img = await imgData(sc.file, 900, 0.7); st.caption = $('sc-caption').value.trim();
+      }
+    } catch (e) { console.warn(e); failMsg(); btn.disabled = false; return; }
+    storiesDb = G('storiesDb', {}); storiesDb[currentUser.username] = st; setStoredData('storiesDb', storiesDb);
+    closeStoryComposer(); renderDashboard(); if ($('stories-tab-screen') && $('stories-tab-screen').classList.contains('active')) renderStoriesTab();
+  };
+
+  // viewer story: video & teks, privasi, balas story
+  const _osv = openStoryViewer;
+  openStoryViewer = function (u) {
+    _osv(u);
+    const st = G('storiesDb', {})[u]; if (!st) return;
+    const c = $('story-img-container'); c.querySelectorAll('.sv-extra').forEach(x => x.remove());
+    $('view-story-image').style.display = (st.type === 'video' || st.type === 'text') ? 'none' : '';
+    if (st.type === 'video' && /^https:\/\//.test(st.video || '')) { const v = document.createElement('video'); v.className = 'sv-extra'; v.src = st.video; v.controls = true; v.autoplay = true; v.playsInline = true; c.appendChild(v); }
+    else if (st.type === 'text') { const d = document.createElement('div'); d.className = 'sv-extra sv-text'; d.style.background = /^#[0-9a-f]{6}$/i.test(st.bg) ? st.bg : BGS[0]; d.textContent = st.text || ''; c.appendChild(d); }
+    const mine = u === currentUser.username;
+    $('story-reply-bar').style.display = mine ? 'none' : 'flex'; $('story-reply-input').value = '';
+    if (mine) $('view-story-time').innerText += ' · ' + (st.privacy === 'friends' ? tr('Contacts only', 'Hanya kontak') : tr('Everyone', 'Semua orang'));
+  };
+  const _csv = closeStoryViewer;
+  closeStoryViewer = function () { document.querySelectorAll('#story-img-container .sv-extra').forEach(x => { if (x.pause) x.pause(); x.remove(); }); _csv(); };
+  window.sendStoryReply = function () {
+    const inp = $('story-reply-input'), t = inp.value.trim(), u = currentViewingStoryUser; if (!t || !u) return;
+    const target = userOf(u); if (!target) return;
+    const st = G('storiesDb', {})[u] || {}, kind = st.type === 'video' ? tr('Video story', 'Story video') : st.type === 'text' ? '"' + (st.text || '').slice(0, 40) + '"' : tr('Photo story', 'Story foto');
+    if (sendRich({ text: t, replyTo: { id: '', sender: u, text: 'Story · ' + kind, story: true } }, target)) { inp.value = ''; closeStoryViewer(); toast(tr('Reply sent', 'Balasan terkirim')); }
+  };
+
+  // ---------- profil saya ----------
+  window.openBio = () => { const u = userOf(me()) || {}; $('bio-input').value = u.bio || ''; open('bio-modal'); };
+  window.closeBio = () => shut('bio-modal');
+  window.setBioChip = el => { $('bio-input').value = el.textContent; };
+  window.saveBio = () => {
+    const b = $('bio-input').value.trim().slice(0, 80), list = G('users', []), u = list.find(x => x.username === me());
+    if (u) { u.bio = b; setStoredData('users', list); }
+    shut('bio-modal'); renderSettingsTab();
+  };
+  function storyPreview() {
+    const st = G('storiesDb', {})[me()], el = $('pf-story');
+    if (!st) { el.innerHTML = `<div class="pf-story-empty"><i class="fa-solid fa-plus"></i> ${tr('Tap to add a story', 'Ketuk untuk membuat story')}</div>`; return; }
+    const left = Math.max(0, 24 - Math.floor((Date.now() - st.createdAt) / 3600000));
+    const th = st.type === 'text' ? `<div class="pf-st-th" style="background:${/^#[0-9a-f]{6}$/i.test(st.bg) ? st.bg : BGS[0]}">Aa</div>`
+      : st.type === 'video' && /^https:\/\//.test(st.video || '') ? `<video class="pf-st-th" src="${esc(st.video)}#t=0.1" muted preload="metadata"></video>`
+      : `<img class="pf-st-th" src="${esc(okSrc(st.img))}">`;
+    el.innerHTML = th + `<div class="pf-st-meta"><b>${esc(st.caption || st.text || tr('Active story', 'Story aktif'))}</b><small>${(st.views || []).length} ${tr('views', 'penonton')} · ${tr('ends in ', 'berakhir ')}${left}${tr('h', ' jam')}</small></div>`;
+  }
+  const _rst2 = renderSettingsTab;
+  renderSettingsTab = function () {
+    _rst2(); if (!currentUser) return;
+    const u = userOf(me()) || currentUser, f = (G('friendsDb', {})[me()] || []), c = G('chatsDb', {});
+    $('pf-bio').textContent = u.bio || tr('No bio yet', 'Belum ada bio');
+    $('pf-joined').textContent = fmtJoined(u.joinedAt);
+    $('st-story').textContent = G('storiesDb', {})[me()] ? 1 : 0;
+    $('st-contacts').textContent = f.length;
+    $('st-chats').textContent = f.filter(x => (c[getChatRoomId(me(), x)] || []).length).length;
+    storyPreview();
+  };
+
+  // ---------- info users ----------
+  $('ui-media').addEventListener('click', e => { if (e.target.tagName === 'IMG') lightbox(e.target.src); });
+  const _fui = window.fillUserInfo;
+  window.fillUserInfo = function () {
+    _fui(); const t = chatTarget(); if (!t) return;
+    const u = userOf(t); if (!u) return;
+    $('ui-bio').textContent = u.bio || ''; $('ui-bio').style.display = u.bio ? 'block' : 'none';
+    $('ui-joined').textContent = fmtJoined(u.joinedAt);
+    $('ui-status').textContent = u.isOnline ? 'Online' : (u.lastSeen ? tr('Last seen ', 'Terakhir dilihat ') + fmtSeen(u.lastSeen) : '-');
+    $('ui-id').textContent = u.uid || '-';
+    $('ui-role').style.display = t === 'risky.err' ? 'inline-block' : 'none';
+    const ms = (G('chatsDb', {})[getChatRoomId(me(), t)] || []).filter(m => !m.deleted);
+    const imgs = ms.filter(m => m.media && m.media.type === 'image' && okSrc(m.media.url)), vn = ms.filter(m => m.audio && /^data:audio\//.test(m.audio));
+    $('ui-media-count').textContent = imgs.length + ' ' + tr('photos', 'foto') + ' · ' + vn.length + ' voice note';
+    $('ui-media').innerHTML = imgs.slice(-12).reverse().map(m => `<img src="${esc(m.media.url)}">`).join('');
+    $('ui-vns').innerHTML = vn.slice(-5).reverse().map(m => `<div class="ui-vn"><span>${esc(m.time || '')}</span><audio controls preload="none" src="${esc(m.audio)}"></audio></div>`).join('');
+  };
+  const REASONS = [['Spam', 'Spam', 'Spam'], ['Harassment', 'Harassment', 'Pelecehan'], ['Scam', 'Scam / fraud', 'Penipuan'], ['Inappropriate', 'Inappropriate content', 'Konten tidak pantas'], ['Other', 'Other', 'Lainnya']];
+  let rpReason = '';
+  const rpLabel = r => currentLang === 'id' ? r[2] : r[1];
+  const rpDraw = () => {
+    const sel = REASONS.find(r => r[0] === rpReason);
+    $('rp-sel-text').textContent = sel ? rpLabel(sel) : tr('Choose a reason', 'Pilih alasan');
+    $('rp-sel-btn').classList.toggle('chosen', !!sel);
+    $('rp-reasons').innerHTML = REASONS.map(r => `<button type="button" data-r="${r[0]}" class="${rpReason === r[0] ? 'on' : ''}"><span>${rpLabel(r)}</span>${rpReason === r[0] ? '<i class="fa-solid fa-check"></i>' : ''}</button>`).join('');
+  };
+  window.toggleRpSelect = () => $('rp-select').classList.toggle('open');
+  $('rp-reasons').addEventListener('click', e => { const b = e.target.closest('[data-r]'); if (b) { rpReason = b.dataset.r; rpDraw(); $('rp-select').classList.remove('open'); } });
+  $('rp-note').addEventListener('input', () => { $('rp-count').textContent = $('rp-note').value.length + '/300'; });
+  window.openReport = () => {
+    const t = chatTarget(); if (!t) return; const u = userOf(t) || {};
+    rpReason = ''; rpDraw(); $('rp-select').classList.remove('open'); $('rp-note').value = ''; $('rp-count').textContent = '0/300';
+    $('rp-avatar').src = u.avatar || ''; $('rp-name').textContent = u.name || t; $('rp-username').textContent = '@' + t; open('report-modal');
+  };
+  window.closeReport = () => shut('report-modal');
+  window.submitReport = () => {
+    const t = chatTarget(); if (!t) return;
+    if (!rpReason) { toast(tr('Choose a reason first', 'Pilih alasan dulu')); return; }
+    const tu = userOf(t) || {};
+    window.orvexaReport({ reporter: me(), target: t, targetUid: tu.uid || '', reason: rpReason, note: $('rp-note').value.trim().slice(0, 300), ts: Date.now(), status: 'open' });
+    shut('report-modal'); toast(tr('Report sent. Thank you.', 'Laporan terkirim. Terima kasih.'));
+  };
+})();
+
+/* ===== blok JS 7 ===== */
+/* ORVEXA: banner & bingkai foto profil (tersimpan di akun, terlihat di semua device/akun) */
+(function () {
+  const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
+  const me = () => currentUser.username;
+  const userOf = n => G('users', []).find(x => x.username === n);
+  const FRAMES = ['gold', 'silver', 'neon', 'rainbow', 'fire', 'purple', 'emerald', 'pink'];
+  const FRAME_NAMES = { gold: ['Gold', 'Emas'], silver: ['Silver', 'Perak'], neon: ['Neon', 'Neon'], rainbow: ['Rainbow', 'Pelangi'], fire: ['Fire', 'Api'], purple: ['Purple', 'Ungu'], emerald: ['Emerald', 'Zamrud'], pink: ['Pink', 'Merah Muda'] };
+  const GRADS = [
+    'linear-gradient(135deg,#e5484d,#7c2d12)', 'linear-gradient(135deg,#3b82f6,#1e1b4b)', 'linear-gradient(135deg,#16a34a,#064e3b)',
+    'linear-gradient(135deg,#a855f7,#312e81)', 'linear-gradient(135deg,#f59e0b,#9a3412)', 'linear-gradient(135deg,#334155,#0f172a)'
+  ];
+  const DEFAULT_BG = 'linear-gradient(135deg,color-mix(in srgb,var(--accent-color) 45%,var(--bg-card)),var(--bg-card))';
+  const okBanner = v => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(v || '') || /^g[0-5]$/.test(v || '');
+  const okFrame = v => FRAMES.includes(v);
+
+  function bannerCss(v) {
+    if (/^g[0-5]$/.test(v || '')) return GRADS[+v[1]];
+    if (okBanner(v)) return 'url("' + v + '")';
+    return DEFAULT_BG;
+  }
+  function paintBanner(el, v, pos) { el.style.backgroundImage = bannerCss(v); el.style.backgroundPosition = '50% ' + (typeof pos === 'number' ? pos : 50) + '%'; }
+  function paintFrame(img, v) {
+    FRAMES.forEach(f => img.classList.remove('fr-' + f));
+    if (okFrame(v)) img.classList.add('fr-' + v);
+  }
+
+  // ---------- simpan ke akun (ikut sync Firestore lewat setStoredData('users')) ----------
+  function saveField(k, v) { saveFields({ [k]: v }); }
+  function saveFields(o) {
+    const list = G('users', []), u = list.find(x => x.username === me());
+    if (!u) return;
+    Object.assign(u, o); setStoredData('users', list);
+    if (currentUser) { Object.assign(currentUser, o); setStoredData('currentUser', currentUser); }
+  }
+
+  // ---------- elemen baru ----------
+  const pfMe = document.querySelector('#settings-tab-screen .pf-me');
+  const pfBanner = document.createElement('div'); pfBanner.className = 'pf-banner'; pfBanner.id = 'pf-banner';
+  pfMe.parentNode.insertBefore(pfBanner, pfMe); pfMe.classList.add('has-banner');
+
+  const uiAvatar = $('ui-avatar');
+  const uiBanner = document.createElement('div'); uiBanner.className = 'ui-banner'; uiBanner.id = 'ui-banner';
+  uiAvatar.parentNode.insertBefore(uiBanner, uiAvatar); uiAvatar.classList.add('has-banner');
+
+  // item di sheet Edit
+  const editCard = document.querySelector('#sheet-edit .settings-card');
+  function addItem(icon, en, idn, fn) {
+    const d = document.createElement('div'); d.className = 'settings-item'; d.onclick = fn;
+    d.innerHTML = '<div class="settings-item-left"><i class="fa-solid ' + icon + '"></i> <span data-en="' + en + '" data-id="' + idn + '">' + tr(en, idn) + '</span></div><i class="fa-solid fa-chevron-right" style="font-size:.85em;color:var(--text-muted)"></i>';
+    editCard.insertBefore(d, editCard.children[4] || null);
+    return d;
+  }
+  addItem('fa-palette', 'Profile Frame', 'Bingkai Foto Profil', () => { closeSheet(); openFrame(); });
+  addItem('fa-image', 'Profile Banner', 'Banner Profil', () => { closeSheet(); openBanner(); });
+
+  // sheet banner & bingkai
+  const sheets = document.createElement('div');
+  sheets.innerHTML =
+    '<div class="sheet-overlay" id="sheet-banner" onclick="closeSheet(event)"><div class="sheet"><div class="sheet-handle"></div>' +
+    '<div class="sheet-title" data-en="Profile Banner" data-id="Banner Profil">Profile Banner</div>' +
+    '<div class="pf-banner" id="bn-preview"></div>' +
+    '<p class="adm-muted" id="bn-hint" style="display:none;margin-top:8px;text-align:center" data-en="Drag the photo to adjust its position" data-id="Geser foto untuk mengatur posisinya">Drag the photo to adjust its position</p>' +
+    '<div class="rp-label" style="margin-top:14px" data-en="Colors" data-id="Warna">Colors</div>' +
+    '<div class="bn-gradients" id="bn-grads"></div>' +
+    '<button type="button" class="btn-secondary" style="margin-top:4px" onclick="document.getElementById(\'bn-file\').click()" data-en="Choose photo" data-id="Pilih foto">Choose photo</button>' +
+    '<button type="button" class="btn-secondary" onclick="removeBanner()" data-en="Remove banner" data-id="Hapus banner">Remove banner</button>' +
+    '</div></div>' +
+    '<div class="sheet-overlay" id="sheet-frame" onclick="closeSheet(event)"><div class="sheet"><div class="sheet-handle"></div>' +
+    '<div class="sheet-title" data-en="Profile Frame" data-id="Bingkai Foto Profil">Profile Frame</div>' +
+    '<div class="fr-grid" id="fr-grid"></div></div></div>' +
+    '<input type="file" id="bn-file" accept="image/*" style="display:none">';
+  while (sheets.firstChild) document.body.appendChild(sheets.firstChild);
+
+  // ---------- banner ----------
+  let nat = null;
+  function curUser() { return userOf(me()) || currentUser || {}; }
+  function drawBannerSheet() {
+    const cu = curUser(), v = cu.banner || '';
+    paintBanner($('bn-preview'), v, cu.bpos);
+    $('bn-hint').style.display = /^data:image/.test(v) ? 'block' : 'none';
+    nat = null;
+    if (/^data:image/.test(v)) { const im = new Image(); im.onload = () => { nat = { w: im.width, h: im.height }; }; im.src = v; }
+    $('bn-grads').innerHTML = GRADS.map((g, i) => '<button type="button" data-g="g' + i + '" class="' + (v === 'g' + i ? 'on' : '') + '" style="background:' + g + '"></button>').join('');
+  }
+  window.openBanner = () => { drawBannerSheet(); openSheet('sheet-banner'); };
+  window.removeBanner = () => { saveFields({ banner: '', bpos: 50 }); drawBannerSheet(); renderSettingsTab(); };
+  $('bn-grads').addEventListener('click', e => {
+    const b = e.target.closest('[data-g]'); if (!b) return;
+    saveFields({ banner: b.dataset.g, bpos: 50 }); drawBannerSheet(); renderSettingsTab();
+  });
+  // banner foto: lebar 720px, tinggi mengikuti foto (3:1 sampai 1:1) agar bisa digeser naik/turun
+  function bannerData(file) {
+    return new Promise((res, rej) => {
+      const im = new Image(), u = URL.createObjectURL(file);
+      im.onload = () => {
+        URL.revokeObjectURL(u);
+        let w = 720, ql = 0.7, out = '';
+        for (let i = 0; i < 8; i++) {
+          const h = Math.min(w, Math.max(Math.round(w / 3), Math.round(w * im.height / im.width)));
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          const s = Math.max(w / im.width, h / im.height), dw = im.width * s, dh = im.height * s;
+          c.getContext('2d').drawImage(im, (w - dw) / 2, (h - dh) / 2, dw, dh);
+          out = c.toDataURL('image/jpeg', ql);
+          if (out.length < 110000) break;
+          if (ql > 0.45) ql -= 0.1; else w = Math.round(w * 0.8);
+        }
+        out.length < 240000 ? res(out) : rej(new Error('too big'));
+      };
+      im.onerror = rej; im.src = u;
+    });
+  }
+  $('bn-file').addEventListener('change', async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    if (!f.type.startsWith('image/')) return;
+    try { saveFields({ banner: await bannerData(f), bpos: 50 }); drawBannerSheet(); renderSettingsTab(); }
+    catch (x) { console.warn(x); alert(tr('Could not process this photo.', 'Foto tidak bisa diproses.')); }
+  });
+
+  // geser posisi foto banner (vertikal) di preview
+  const prev = $('bn-preview');
+  let drag = null;
+  prev.addEventListener('pointerdown', e => {
+    const u = curUser(); if (!/^data:image/.test(u.banner || '') || !nat) return;
+    const r = prev.getBoundingClientRect(), over = r.width * nat.h / nat.w - r.height; if (over <= 1) return;
+    drag = { y: e.clientY, pos: typeof u.bpos === 'number' ? u.bpos : 50, over, cur: null };
+    prev.setPointerCapture(e.pointerId);
+  });
+  prev.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const p = Math.max(0, Math.min(100, drag.pos - (e.clientY - drag.y) / drag.over * 100));
+    drag.cur = p; prev.style.backgroundPosition = '50% ' + p + '%';
+  });
+  function endDrag() {
+    if (!drag) return; const p = drag.cur; drag = null;
+    if (typeof p === 'number') { saveField('bpos', Math.round(p)); renderSettingsTab(); }
+  }
+  ['pointerup', 'pointercancel'].forEach(ev => prev.addEventListener(ev, endDrag));
+
+  // ---------- bingkai ----------
+  function drawFrameSheet() {
+    const u = curUser(), v = u.frame || '', av = esc(okSrc(u.avatar) || '');
+    const opt = (id, name) => '<button type="button" class="fr-opt ' + (v === id ? 'on' : '') + '" data-f="' + id + '"><img src="' + av + '" class="' + (id ? 'fr-' + id : '') + '"><span>' + name + '</span></button>';
+    $('fr-grid').innerHTML = opt('', tr('None', 'Tanpa')) + FRAMES.map(f => opt(f, FRAME_NAMES[f][currentLang === 'id' ? 1 : 0])).join('');
+  }
+  window.openFrame = () => { drawFrameSheet(); openSheet('sheet-frame'); };
+  $('fr-grid').addEventListener('click', e => {
+    const b = e.target.closest('[data-f]'); if (!b) return;
+    saveField('frame', b.dataset.f); drawFrameSheet(); renderSettingsTab();
+  });
+
+  // ---------- tampilkan di Profil Saya ----------
+  const _rst = renderSettingsTab;
+  renderSettingsTab = function () {
+    _rst(); if (!currentUser) return;
+    const u = curUser();
+    paintBanner($('pf-banner'), u.banner || '', u.bpos);
+    paintFrame($('settings-user-avatar'), u.frame || '');
+  };
+
+  // ---------- tampilkan di Info users (profil orang lain, ikut realtime) ----------
+  const _fui = window.fillUserInfo;
+  window.fillUserInfo = function () {
+    _fui();
+    const t = (activeChatUser && !isSystemChat && activeChatUser.username) ? activeChatUser.username : null; if (!t) return;
+    const u = userOf(t) || {};
+    paintBanner($('ui-banner'), u.banner || '', u.bpos);
+    paintFrame($('ui-avatar'), u.frame || '');
+  };
+})();
+
+/* ===== blok JS 8 ===== */
+/* ORVEXA v3: connection, blokir+laporan, tanggal bergabung, OrVexa ID privat, log-in cepat, bio di chat */
+(function () {
+  const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
+  const DEV = 'risky.err', me = () => currentUser && currentUser.username, isDev = () => me() === DEV;
+  const userOf = n => G('users', []).find(x => x.username === n);
+  const target = () => (activeChatUser && !isSystemChat && activeChatUser.username) ? activeChatUser.username : null;
+  const fullDate = ms => ms ? new Date(ms).toLocaleDateString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : '-';
+  const say = m => { if (window.toast) window.toast(m); };
+
+  // ---------- Info users: blokir di sebelah laporan ----------
+  const rep = document.querySelector('#user-info-screen .ui-report'), blk = $('ui-block-btn');
+  const danger = document.createElement('div'); danger.className = 'ui-danger';
+  rep.parentNode.insertBefore(danger, rep); danger.appendChild(blk); danger.appendChild(rep);
+
+  // ---------- Info users: Connection (kontak yang sama) ----------
+  const mediaSec = $('ui-media-count').parentNode;
+  const cSec = document.createElement('div'); cSec.className = 'pf-sec'; cSec.setAttribute('data-en', 'Connection'); cSec.setAttribute('data-id', 'Koneksi'); cSec.textContent = tr('Connection', 'Koneksi');
+  const cWrap = document.createElement('div'); cWrap.className = 'cn-wrap'; cWrap.id = 'ui-conn'; cWrap.dataset.open = '0';
+  mediaSec.parentNode.insertBefore(cSec, mediaSec); mediaSec.parentNode.insertBefore(cWrap, mediaSec);
+  cWrap.addEventListener('click', e => { if (e.target.closest('.cn-tap')) { cWrap.dataset.open = cWrap.dataset.open === '1' ? '0' : '1'; renderConn(); } });
+
+  function renderConn() {
+    const t = target(); if (!t || !currentUser) return;
+    const fr = G('friendsDb', {}), a = fr[me()] || [], b = fr[t] || [];
+    const list = a.filter(x => b.includes(x) && x !== t && x !== me()).map(userOf).filter(Boolean);
+    const open = cWrap.dataset.open === '1' && list.length;
+    cWrap.classList.toggle('open', !!open);
+    if (!list.length) {
+      cWrap.innerHTML = '<div class="cn-card"><div class="cn-txt"><span>' + esc(tr('No mutual contacts yet', 'Belum ada kontak yang sama')) + '</span></div></div>';
+      return;
+    }
+    const n = list.length;
+    const stack = list.slice(0, 4).map(u => '<img src="' + esc(okSrc(u.avatar)) + '">').join('');
+    const names = list.slice(0, 3).map(u => esc(u.name)).join(', ') + (n > 3 ? ' +' + (n - 3) : '');
+    cWrap.innerHTML = '<div class="cn-card cn-tap"><div class="cn-stack">' + stack + '</div><div class="cn-txt"><b>' + n + ' ' + esc(tr(n === 1 ? 'mutual contact' : 'mutual contacts', 'kontak yang sama')) + '</b><span>' + names + '</span></div><i class="fa-solid fa-chevron-right cn-chev"></i></div>' +
+      (open ? '<div class="cn-list">' + list.map(u => '<div class="cn-row"><img src="' + esc(okSrc(u.avatar)) + '"><div><b>' + esc(u.name) + vb(u.username) + '</b><span>@' + esc(u.username) + '</span></div></div>').join('') + '</div>' : '');
+  }
+
+  const _ou = window.openUserInfo;
+  window.openUserInfo = function () { cWrap.dataset.open = '0'; _ou(); };
+
+  const _fui = window.fillUserInfo;
+  window.fillUserInfo = function () {
+    _fui(); const t = target(); if (!t) return;
+    const u = userOf(t) || {};
+    $('ui-joined').textContent = fullDate(u.joinedAt);
+    // OrVexa ID hanya terlihat oleh pemilik (di Profil Saya) dan Dev
+    const row = $('ui-id').closest('.pf-item');
+    if (isDev()) row.style.display = ''; else { row.style.display = 'none'; $('ui-id').textContent = ''; }
+    renderConn();
+  };
+
+  // ---------- Profil Saya: tanggal bergabung & OrVexa ID bisa disembunyikan ----------
+  const idEl = $('pf-id'), idRow = idEl.closest('.pf-item');
+  idRow.removeAttribute('onclick'); idRow.onclick = null;
+  const txt = idRow.querySelector('.pf-txt');
+  const hint = document.createElement('span'); hint.className = 'pf-hint'; hint.setAttribute('data-en', 'Quick Login code · keep it private'); hint.setAttribute('data-id', 'Kode Log-in Cepat · jangan dibagikan'); hint.textContent = tr('Quick Login code · keep it private', 'Kode Log-in Cepat · jangan dibagikan');
+  txt.appendChild(hint);
+  const eye = document.createElement('button'); eye.type = 'button'; eye.className = 'pf-eyebtn'; eye.innerHTML = '<i class="fa-solid fa-eye"></i>';
+  idRow.insertBefore(eye, idRow.querySelector('.pf-copy'));
+  let idShown = false, idReal = '';
+  function drawId() {
+    idEl.textContent = idShown ? (idReal || '-') : '•'.repeat(14);
+    eye.firstChild.className = 'fa-solid ' + (idShown ? 'fa-eye-slash' : 'fa-eye');
+  }
+  eye.addEventListener('click', e => { e.stopPropagation(); idShown = !idShown; drawId(); });
+  idRow.addEventListener('click', e => {
+    if (e.target.closest('.pf-eyebtn') || !idReal) return;
+    if (navigator.clipboard) navigator.clipboard.writeText(idReal).catch(() => {});
+    const ic = idRow.querySelector('.pf-copy'); ic.className = 'fa-solid fa-check pf-copy'; setTimeout(() => ic.className = 'fa-regular fa-copy pf-copy', 1200);
+  });
+  const _rst = renderSettingsTab;
+  renderSettingsTab = function () {
+    _rst(); if (!currentUser) return;
+    const u = userOf(me()) || currentUser;
+    $('pf-joined').textContent = fullDate(u.joinedAt);
+    idReal = currentUser.uid || u.uid || ''; drawId();
+  };
+  const _lo = window.handleLogOut;
+  window.handleLogOut = function () { idShown = false; idReal = ''; return _lo.apply(this, arguments); };
+
+  // ---------- bio di bawah nama pada header chat ----------
+  const bio = document.createElement('div'); bio.id = 'chat-header-bio'; bio.className = 'chat-header-bio'; bio.style.display = 'none';
+  $('active-chat-status').parentNode.appendChild(bio);
+  function drawBio() {
+    const t = target(), u = t ? userOf(t) : null, b = u && u.bio ? u.bio : '';
+    bio.textContent = b; bio.style.display = b ? 'block' : 'none';
+  }
+  const _rm = renderMessages;
+  renderMessages = function () { _rm(); drawBio(); };
+
+  // ---------- Sign In: menu titik tiga -> Log-in Cepat ----------
+  const si = $('signin-screen');
+  const dots = document.createElement('button'); dots.type = 'button'; dots.className = 'si-dots'; dots.setAttribute('aria-label', 'Menu'); dots.innerHTML = '<i class="fa-solid fa-ellipsis-vertical"></i>';
+  const menu = document.createElement('div'); menu.className = 'si-menu';
+  menu.innerHTML = '<button type="button" class="si-menu-item"><i class="fa-solid fa-fingerprint"></i><span data-en="Quick Login" data-id="Log-in Cepat">' + tr('Quick Login', 'Log-in Cepat') + '</span></button>';
+  si.appendChild(dots); si.appendChild(menu);
+  dots.addEventListener('click', e => { e.stopPropagation(); menu.classList.toggle('open'); });
+  document.addEventListener('click', () => menu.classList.remove('open'));
+  menu.querySelector('.si-menu-item').addEventListener('click', () => { menu.classList.remove('open'); openQuick(); });
+
+  const qm = document.createElement('div'); qm.className = 'modal-overlay'; qm.id = 'ql-modal';
+  qm.innerHTML =
+    '<div class="modal-card">' +
+    '<div class="rp-head"><span class="rp-ico"><i class="fa-solid fa-fingerprint"></i></span><div><h3 class="modal-title" data-en="Quick Login" data-id="Log-in Cepat">' + tr('Quick Login', 'Log-in Cepat') + '</h3>' +
+    '<p class="rp-sub" data-en="Sign in with your OrVexa ID." data-id="Masuk dengan OrVexa ID kamu.">' + tr('Sign in with your OrVexa ID.', 'Masuk dengan OrVexa ID kamu.') + '</p></div></div>' +
+    '<div class="form-group"><label>OrVexa ID</label><input type="text" id="ql-id" autocomplete="off" autocapitalize="off" spellcheck="false" data-en="Paste your OrVexa ID" data-id="Tempel OrVexa ID kamu" placeholder="' + tr('Paste your OrVexa ID', 'Tempel OrVexa ID kamu') + '"></div>' +
+    '<div class="form-group"><label data-i18n="label_password">Password</label><div class="input-wrapper"><input type="password" id="ql-pass" placeholder="Password"><i class="fa-regular fa-eye toggle-password" onclick="togglePassword(\'ql-pass\', this)"></i></div></div>' +
+    '<p id="ql-error" class="log-error" style="font-size:.9em;margin-bottom:12px;display:none"></p>' +
+    '<button type="button" class="btn-primary" id="ql-go" onclick="quickLogin()" data-i18n="btn_signin">Sign In</button>' +
+    '<button type="button" class="btn-secondary" style="margin-top:10px" onclick="closeQuick()" data-i18n="btn_cancel">Cancel</button>' +
+    '</div>';
+  document.body.appendChild(qm);
+  if (window.applyLanguage) { try { applyLanguage(currentLang); } catch (e) {} }
+
+  window.openQuick = () => { $('ql-id').value = ''; $('ql-pass').value = ''; $('ql-error').style.display = 'none'; $('ql-go').disabled = false; qm.classList.add('active'); setTimeout(() => $('ql-id').focus(), 50); };
+  window.closeQuick = () => { qm.classList.remove('active'); $('ql-pass').value = ''; };
+  window.quickLogin = async function () {
+    const idv = $('ql-id').value.trim(), pass = $('ql-pass').value, err = $('ql-error'), btn = $('ql-go');
+    const fail = m => { err.textContent = m; err.style.display = 'block'; };
+    err.style.display = 'none';
+    if (!idv || !pass) return fail(tr('Enter your OrVexa ID and password.', 'Masukkan OrVexa ID dan password.'));
+    btn.disabled = true;
+    try {
+      const s = await window.orvexaDb.collection('usernames').where('uid', '==', idv).limit(1).get();
+      if (s.empty) { btn.disabled = false; return fail(tr('OrVexa ID not found or password incorrect.', 'OrVexa ID tidak ditemukan atau password salah.')); }
+      const email = s.docs[0].data().email;
+      closeQuick();
+      $('signin-username').value = email; $('signin-pass').value = pass;
+      await window.handleSignIn({ preventDefault() {} });
+    } catch (e) {
+      console.warn(e);
+      fail(e && e.code === 'permission-denied' ? tr('Quick Login is not enabled on the server yet.', 'Log-in Cepat belum diaktifkan di server.') : tr('Quick Login failed. Try again.', 'Log-in Cepat gagal. Coba lagi.'));
+    }
+    btn.disabled = false;
+  };
+})();
+
+/* ===== blok JS 9 ===== */
+/* ORVEXA: notifikasi update log, saran fitur, keluhan */
+(function () {
+  const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
+  const open = n => $(n).classList.add('active'), shut = n => $(n).classList.remove('active');
+  const upd = () => G('updatesDb', []), seen = () => +localStorage.getItem('orvexa_updSeen') || 0;
+  let since = 0;
+
+  function drawNotif() {
+    const a = upd();
+    $('nf-list').innerHTML = a.length ? a.map(u => `<div class="nf-card${u.ts > since ? ' new' : ''}"><div class="nf-head"><b>${esc(u.title)}</b><span>${new Date(u.ts).toLocaleDateString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</span></div><p>${esc(u.body).replace(/\n/g, '<br>')}</p></div>`).join('')
+      : `<p class="nf-empty">${tr('No updates yet.', 'Belum ada update.')}</p>`;
+  }
+  window.bellUpdate = function () {
+    const b = $('bell-badge'); if (!b) return;
+    const n = upd().filter(u => u.ts > seen()).length;
+    b.style.display = n ? 'flex' : 'none'; b.textContent = n > 9 ? '9+' : n;
+    if ($('sheet-notif').classList.contains('active')) drawNotif();
+  };
+  window.openNotif = () => {
+    since = seen(); drawNotif(); open('sheet-notif');
+    localStorage.setItem('orvexa_updSeen', String(Math.max(seen(), ...upd().map(u => u.ts), 0)));
+    $('bell-badge').style.display = 'none';
+  };
+  window.closeFx = n => shut(n);
+
+  // rate limit ringan supaya tidak spam
+  const wait = () => { const t = +localStorage.getItem('orvexa_lastTicket') || 0; if (Date.now() - t < 30000) { toast(tr('Please wait a moment before sending again.', 'Tunggu sebentar sebelum mengirim lagi.')); return true; } return false; };
+  const stamp = () => localStorage.setItem('orvexa_lastTicket', String(Date.now()));
+
+  const sugOpen = () => { const c = G('configDb', {}); return !(c.suggestions && c.suggestions.open === false); };
+  window.openSuggest = () => {
+    const o = sugOpen();
+    $('sg-closed').style.display = o ? 'none' : 'block'; $('sg-form').style.display = o ? 'block' : 'none'; $('sg-send').style.display = o ? '' : 'none';
+    $('sg-text').value = ''; $('sg-count').textContent = '0/300'; open('suggest-modal');
+  };
+  $('sg-text').addEventListener('input', () => { $('sg-count').textContent = $('sg-text').value.length + '/300'; });
+  window.sendSuggest = () => {
+    if (!sugOpen()) return;
+    const t = $('sg-text').value.trim();
+    if (!t) return toast(tr('Write your idea first.', 'Tulis idemu dulu.'));
+    if (wait()) return;
+    window.orvexaSuggest({ from: currentUser.username, text: t.slice(0, 300), ts: Date.now(), status: 'new' });
+    stamp(); shut('suggest-modal'); toast(tr('Thanks for your suggestion!', 'Terima kasih atas sarannya!'));
+  };
+
+  const TYPES = [['Bug', 'Bug', 'Bug'], ['UI', 'Display', 'Tampilan'], ['Other', 'Other', 'Lainnya']];
+  let cpType = 'Bug';
+  const cpDraw = () => { $('cp-types').innerHTML = TYPES.map(t => `<button type="button" data-t="${t[0]}" class="${cpType === t[0] ? 'on' : ''}">${currentLang === 'id' ? t[2] : t[1]}</button>`).join(''); };
+  $('cp-types').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (b) { cpType = b.dataset.t; cpDraw(); } });
+  $('cp-text').addEventListener('input', () => { $('cp-count').textContent = $('cp-text').value.length + '/500'; });
+  window.openComplain = () => { cpType = 'Bug'; cpDraw(); $('cp-text').value = ''; $('cp-count').textContent = '0/500'; open('complain-modal'); };
+  window.sendComplain = () => {
+    const t = $('cp-text').value.trim();
+    if (!t) return toast(tr('Describe the problem first.', 'Jelaskan masalahnya dulu.'));
+    if (wait()) return;
+    window.orvexaComplain({ from: currentUser.username, type: cpType, text: t.slice(0, 500), ua: navigator.userAgent.slice(0, 160), screen: (document.querySelector('.screen.active') || {}).id || '', lang: currentLang, ts: Date.now(), status: 'open' });
+    stamp(); shut('complain-modal'); toast(tr('Report sent. Thank you!', 'Laporan terkirim. Terima kasih!'));
+  };
+  bellUpdate();
+})();
+
+/* ===== blok JS 10 ===== */
+/* ORVEXA: label kustom (dikelola di Admin Panel) & tautan sosmed */
+(function () {
+  const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
+  const me = () => currentUser && currentUser.username;
+  const userOf = n => G('users', []).find(x => x.username === n);
+  const say = m => { if (window.toast) window.toast(m); };
+
+  // ================= LABEL =================
+  const ICONS = ['crown', 'code', 'shield-halved', 'star', 'heart', 'bolt', 'fire', 'gem', 'rocket', 'leaf', 'headset', 'check'];
+  const STYLES = ['solid', 'soft', 'outline'];
+  const DEFAULT = { id: 'dev', text: 'DEV', color: '#e5484d', style: 'solid', icon: 'code' };
+  const okColor = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : '#e5484d';
+  const clean = l => ({ id: String(l.id || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 24), text: String(l.text || '').slice(0, 14), color: okColor(l.color), style: STYLES.includes(l.style) ? l.style : 'solid', icon: ICONS.includes(l.icon) ? l.icon : '' });
+  const cfg = () => { const l = (G('configDb', {}) || {}).labels || {}; return { list: Array.isArray(l.list) ? l.list : [], assign: Array.isArray(l.assign) ? l.assign : [] }; };
+  const defs = () => { const l = cfg().list.map(clean).filter(x => x.id && x.text); if (!l.some(x => x.id === 'dev')) l.unshift({ ...DEFAULT }); return l; };
+  const assigned = u => { const a = cfg().assign.find(x => x && x.u === u); if (a) return Array.isArray(a.l) ? a.l : []; return u === 'risky.err' ? ['dev'] : []; };
+  const lum = c => { const n = parseInt(c.slice(1), 16), f = v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }; return .2126 * f(n >> 16 & 255) + .7152 * f(n >> 8 & 255) + .0722 * f(n & 255); };
+  const pill = l => { const c = clean(l); return '<span class="olb ' + c.style + '" style="--lb:' + c.color + ';--lb-fg:' + (lum(c.color) > .5 ? '#111' : '#fff') + '">' + (c.icon ? '<i class="fa-solid fa-' + c.icon + '"></i>' : '') + '<span>' + esc(c.text || 'LABEL') + '</span></span>'; };
+  const html = u => { const d = defs(); return assigned(u).map(id => d.find(l => l.id === id)).filter(Boolean).map(pill).join(''); };
+  window.lb = { defs, assigned, pill, html, cfg, ICONS, STYLES, DEFAULT };
+  window.lbHtml = html;
+
+  // container label di Profil Saya dan Info users
+  const mk = (after, id) => { const s = document.createElement('span'); s.id = id; s.className = 'lb-wrap'; after.parentNode.insertBefore(s, after.nextSibling); return s; };
+  mk($('pf-role'), 'pf-labels'); mk($('ui-role'), 'ui-labels');
+
+  // ================= SOSMED =================
+  const P = {
+    tiktok: { name: 'TikTok', icon: 'fa-brands fa-tiktok', cls: 'soc-tt' },
+    instagram: { name: 'Instagram', icon: 'fa-brands fa-instagram', cls: 'soc-ig' },
+    whatsapp: { name: 'WhatsApp', icon: 'fa-brands fa-whatsapp', cls: 'soc-wa' }
+  };
+  const HANDLE = { tiktok: /^[A-Za-z0-9._]{2,24}$/, instagram: /^[A-Za-z0-9._]{1,30}$/ };
+  // null = tidak valid, '' = kosong (hapus), selain itu = nilai bersih
+  function norm(kind, v) {
+    v = String(v == null ? '' : v).trim(); if (!v) return '';
+    if (kind === 'whatsapp') {
+      const m = v.match(/wa\.me\/(\d+)/i); if (m) v = m[1];
+      v = v.replace(/[\s().+-]/g, '');
+      if (/^0\d+$/.test(v)) v = '62' + v.slice(1);
+      return /^\d{8,15}$/.test(v) ? v : null;
+    }
+    const m = v.match(/(?:instagram\.com|tiktok\.com)\/@?([^\/?#\s]+)/i); if (m) v = m[1];
+    v = v.replace(/^@/, '').replace(/\/+$/, '');
+    return HANDLE[kind].test(v) ? v : null;
+  }
+  const clean1 = (k, v) => { const n = norm(k, v); return n || ''; };
+  const urlOf = (k, v) => { const n = clean1(k, v); if (!n) return ''; return k === 'tiktok' ? 'https://www.tiktok.com/@' + n : k === 'instagram' ? 'https://www.instagram.com/' + n + '/' : 'https://wa.me/' + n; };
+  const shown = (k, v) => (k === 'whatsapp' ? '+' : '@') + clean1(k, v);
+  const rows = u => Object.keys(P).filter(k => urlOf(k, u[k])).map(k =>
+    '<a class="pf-item pf-soc" href="' + esc(urlOf(k, u[k])) + '" target="_blank" rel="noopener noreferrer"><span class="pf-tile ' + P[k].cls + '"><i class="' + P[k].icon + '"></i></span><div class="pf-txt"><b>' + P[k].name + '</b><span class="pf-val">' + esc(shown(k, u[k])) + '</span></div><i class="fa-solid fa-arrow-up-right-from-square pf-copy"></i></a>').join('');
+
+  function saveFields(o) {
+    const list = G('users', []), u = list.find(x => x.username === me()); if (!u) return;
+    Object.assign(u, o); setStoredData('users', list);
+    if (currentUser) { Object.assign(currentUser, o); setStoredData('currentUser', currentUser); }
+  }
+  window.openSocial = () => {
+    const u = userOf(me()) || currentUser || {};
+    Object.keys(P).forEach(k => { $('soc-in-' + k).value = clean1(k, u[k]); });
+    $('soc-err').style.display = 'none'; openSheet('sheet-social');
+  };
+  window.saveSocial = () => {
+    const out = {}, err = $('soc-err');
+    for (const k of Object.keys(P)) {
+      const n = norm(k, $('soc-in-' + k).value);
+      if (n === null) { err.textContent = k === 'whatsapp' ? tr('WhatsApp number is not valid. Use digits with country code, e.g. 62812xxxxxxx.', 'Nomor WhatsApp tidak valid. Pakai angka dengan kode negara, mis. 62812xxxxxxx.') : tr(P[k].name + ' username is not valid.', 'Username ' + P[k].name + ' tidak valid.'); err.style.display = 'block'; return; }
+      out[k] = n;
+    }
+    saveFields(out); closeSheet(); renderSettingsTab(); say(tr('Social links saved', 'Tautan sosmed tersimpan'));
+  };
+
+  // ================= TAMPILAN =================
+  const _rst = renderSettingsTab;
+  renderSettingsTab = function () {
+    _rst(); if (!currentUser) return;
+    const u = userOf(me()) || currentUser, r = rows(u);
+    $('pf-labels').innerHTML = html(u.username);
+    $('pf-social').innerHTML = r + '<div class="pf-item" onclick="openSocial()"><span class="pf-tile"><i class="fa-solid ' + (r ? 'fa-pen' : 'fa-plus') + '"></i></span><div class="pf-txt"><b>' + esc(r ? tr('Edit social links', 'Ubah tautan sosmed') : tr('Add social links', 'Tambah tautan sosmed')) + '</b><span class="pf-val">TikTok · Instagram · WhatsApp</span></div></div>';
+  };
+  const _fui = window.fillUserInfo;
+  window.fillUserInfo = function () {
+    _fui();
+    const t = (activeChatUser && !isSystemChat && activeChatUser.username) ? activeChatUser.username : null; if (!t) return;
+    const u = userOf(t) || {}, r = rows(u);
+    $('ui-labels').innerHTML = html(t);
+    $('ui-social').innerHTML = r; $('ui-soc-sec').style.display = r ? '' : 'none'; $('ui-social').style.display = r ? '' : 'none';
+  };
+  if (currentUser) { try { renderSettingsTab(); } catch (e) {} }
+})();
+
+/* ===== blok JS 11 ===== */
+/* ORVEXA: versi aplikasi, link resmi (Saluran, TikTok), mode maintenance */
+(function () {
+  const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
+  const me = () => currentUser && currentUser.username, isDev = () => me() === 'risky.err';
+  const say = m => { if (window.toast) window.toast(m); };
+  const cfg = () => G('configDb', {}) || {};
+
+  // ---------- pembersih nilai (data dari Firestore tidak dipercaya) ----------
+  const cleanVer = v => { v = String(v == null ? '' : v).trim().replace(/^v/i, ''); return /^[0-9][0-9A-Za-z.+-]{0,15}$/.test(v) ? v : ''; };
+  const cleanChannel = v => {
+    try { const x = new URL(String(v || '').trim()); return x.protocol === 'https:' && /^(www\.)?whatsapp\.com$/i.test(x.hostname) && /^\/channel\/[A-Za-z0-9_-]+\/?$/.test(x.pathname) ? 'https://whatsapp.com' + x.pathname.replace(/\/$/, '') : ''; } catch (e) { return ''; }
+  };
+  const cleanTiktok = v => {
+    v = String(v || '').trim(); if (!v) return '';
+    let m = v.match(/^https:\/\/(vm|vt)\.tiktok\.com\/([A-Za-z0-9]+)\/?$/i); if (m) return 'https://' + m[1].toLowerCase() + '.tiktok.com/' + m[2] + '/';
+    m = v.match(/^(?:https:\/\/(?:www\.)?tiktok\.com\/)?@?([A-Za-z0-9._]{2,24})(?:[\/?#].*)?$/i);
+    return m ? 'https://www.tiktok.com/@' + m[1] : '';
+  };
+  const FEATURES = ['messages', 'stories', 'contacts'];
+  const appRaw = () => { const a = cfg().app || {}; return { version: a.version || '', channel: a.channel || '', tiktok: a.tiktok || '' }; };
+  const maint = () => { const m = cfg().maintenance || {}; return { on: m.on === true, message: String(m.message || '').slice(0, 200), block: (Array.isArray(m.block) ? m.block : []).filter(x => FEATURES.includes(x)), since: +m.since || 0 }; };
+  window.oapp = {
+    appRaw, maint, FEATURES, cleanVer, cleanChannel, cleanTiktok,
+    ver: () => cleanVer(appRaw().version) || '2.4.0',
+    app: () => { const r = appRaw(); return { channel: cleanChannel(r.channel), tiktok: cleanTiktok(r.tiktok) }; },
+    blocked: f => { const m = maint(); return !!(m.on && m.block.includes(f)) && !isDev(); }
+  };
+  const blocked = window.oapp.blocked;
+  const notify = () => say(tr('Server maintenance: ', 'Server sedang maintenance: ') + (maint().message || tr('this feature is temporarily unavailable.', 'fitur ini sementara tidak tersedia.')));
+
+  // ---------- blokir aksi saat maintenance (masuk/baca tetap bisa) ----------
+  const wrap = (name, feature, guard) => {
+    const orig = window[name]; if (typeof orig !== 'function') return;
+    window[name] = function () { if (blocked(feature) && (!guard || guard.apply(this, arguments))) { notify(); return name === 'sendRich' ? false : undefined; } return orig.apply(this, arguments); };
+  };
+  wrap('sendRich', 'messages');
+  wrap('chatAction', 'messages', () => !($('chat-input').value || '').trim());   // tombol mic (tanpa teks) = kirim voice note
+  wrap('pickMedia', 'messages');
+  wrap('postStory', 'stories');
+  wrap('openStoryComposer', 'stories');
+  wrap('openAddUserModal', 'contacts');
+  wrap('addUserAndChat', 'contacts', u => !((G('friendsDb', {})[me()] || []).includes(u)));
+  const _os = window.openSheet;
+  window.openSheet = function (n) { if (n === 'sheet-attach' && blocked('messages')) { notify(); return; } return _os.apply(this, arguments); };
+
+  // ---------- tampilan ----------
+  const bn = $('mt-banner'), dh = document.querySelector('#dashboard-screen .dash-header');
+  if (dh) dh.insertAdjacentElement('afterend', bn);
+  function drawFollow() {
+    const el = $('nf-follow'); if (!el) return;
+    const a = window.oapp.app(), it = [];
+    const link = (u, cls, ic, t, s) => '<a class="nf-soc" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer"><span class="pf-tile ' + cls + '"><i class="' + ic + '"></i></span><div><b>' + esc(t) + '</b><small>' + esc(s) + '</small></div></a>';
+    if (a.channel) it.push(link(a.channel, 'soc-wa', 'fa-brands fa-whatsapp', tr('WhatsApp Channel', 'Saluran WhatsApp'), tr('Official channel', 'Saluran resmi')));
+    if (a.tiktok) { const h = (a.tiktok.match(/@([^\/?#]+)/) || [])[1]; it.push(link(a.tiktok, 'soc-tt', 'fa-brands fa-tiktok', 'TikTok', h ? '@' + h : tr('Official account', 'Akun resmi'))); }
+    el.style.display = it.length ? '' : 'none';
+    el.innerHTML = it.length ? '<div class="rp-label">' + tr('Follow OrVexa', 'Ikuti OrVexa') + '</div><div class="nf-follow-grid">' + it.join('') + '</div>' : '';
+  }
+  let phKeep = null;
+  function render() {
+    const m = maint(), ci = $('chat-input');
+    bn.style.display = m.on ? '' : 'none';
+    $('mt-banner-ttl').textContent = tr('Server maintenance', 'Server sedang maintenance');
+    $('mt-banner-msg').textContent = (m.message || tr('Some features are temporarily unavailable.', 'Beberapa fitur sementara tidak tersedia.')) + (m.on && isDev() ? ' ' + tr('(You are exempt.)', '(Kamu dikecualikan.)') : '');
+    const bm = blocked('messages');
+    document.body.classList.toggle('maint-msg', bm);
+    if (ci) { if (bm) { if (phKeep === null) phKeep = ci.placeholder; ci.placeholder = tr('Messaging paused (maintenance)', 'Kirim pesan dijeda (maintenance)'); } else if (phKeep !== null) { ci.placeholder = phKeep; phKeep = null; } }
+    const pv = $('pf-version'); if (pv) pv.textContent = 'v' + window.oapp.ver();
+    if ($('sheet-notif').classList.contains('active')) drawFollow();
+  }
+  const _bu = window.bellUpdate;
+  window.bellUpdate = function () { const r = _bu && _bu.apply(this, arguments); try { render(); } catch (e) { console.warn(e); } return r; };
+  const _on = window.openNotif;
+  window.openNotif = function () { drawFollow(); return _on.apply(this, arguments); };
+  const _rst = renderSettingsTab;
+  renderSettingsTab = function () { _rst(); render(); };
+  render();
+})();
+
+/* ===== blok JS 12 ===== */
+/* ORVEXA: accept chat (batas 3 pesan), sistem ban baru, deteksi aktivitas mencurigakan */
+(function () {
+  const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
+  const DEV = 'risky.err', LIMIT = 3, me = () => currentUser && currentUser.username;
+  const userOf = n => G('users', []).find(x => x.username === n);
+  const say = m => { if (window.toast) window.toast(m); };
+  const chatTarget = () => (typeof activeChatUser !== 'undefined' && activeChatUser && !isSystemChat && activeChatUser.username) ? activeChatUser.username : null;
+
+  // ================= ACCEPT CHAT =================
+  function reqState(other) {
+    const room = getChatRoomId(me(), other), list = G('chatsDb', {})[room] || [];
+    const mine = list.filter(m => m.sender === me()).length, theirs = list.filter(m => m.sender === other).length;
+    const accepted = !!G('acceptsDb', {})[room] || (mine > 0 && theirs > 0);
+    return { room, mine, theirs, accepted, receiver: !accepted && theirs > 0 && mine === 0, limited: !accepted && mine >= LIMIT, left: Math.max(0, LIMIT - mine) };
+  }
+  function acceptRoom(room) {
+    if (window.orvexaAccept) window.orvexaAccept(room);
+    else { const a = G('acceptsDb', {}); a[room] = Date.now(); localStorage.setItem('orvexa_acceptsDb', JSON.stringify(a)); }
+  }
+  window.reqAccept = function () {
+    const t = chatTarget(); if (!t) return;
+    acceptRoom(reqState(t).room); renderMessages();
+  };
+  window.reqDecline = function () {
+    const t = chatTarget(); if (!t) return;
+    if (!confirm(tr('Delete this message request?', 'Hapus permintaan pesan ini?'))) return;
+    const f = G('friendsDb', {}); f[me()] = (f[me()] || []).filter(x => x !== t); setStoredData('friendsDb', f);
+    switchTab('chats'); say(tr('Request deleted', 'Permintaan dihapus'));
+  };
+
+  const bar = document.createElement('div'); bar.className = 'req-bar'; bar.id = 'req-bar';
+  const cb = $('composer-bar'); cb.parentNode.insertBefore(bar, cb);
+  function drawReq() {
+    const scr = $('chat-room-screen'), t = chatTarget();
+    let mode = '';
+    if (t && currentUser && $('blocked-bar').style.display !== 'flex') {
+      const st = reqState(t), nm = esc(activeChatUser.name || t);
+      if (st.receiver) {
+        mode = 'recv';
+        bar.innerHTML = '<div class="rq-txt"><b>' + nm + ' ' + tr('wants to message you', 'ingin mengirim pesan') + '</b><span>' + tr('Accept to chat normally. Until then they can only send ' + LIMIT + ' messages.', 'Terima untuk chat seperti biasa. Sebelum itu mereka hanya bisa kirim ' + LIMIT + ' pesan.') + '</span></div><div class="rq-btns"><button type="button" class="rq-no" onclick="reqDecline()">' + tr('Delete', 'Hapus') + '</button><button type="button" class="rq-ok" onclick="reqAccept()">' + tr('Accept', 'Terima') + '</button></div>';
+      } else if (st.limited) {
+        mode = 'limit';
+        bar.innerHTML = '<div class="rq-txt"><b>' + tr('Message limit reached', 'Batas pesan tercapai') + '</b><span>' + tr('You can chat again once ' + (activeChatUser.name || t) + ' accepts your chat.', 'Kamu bisa chat lagi setelah ' + (activeChatUser.name || t) + ' menerima chatmu.') + '</span></div>';
+      } else if (!st.accepted && st.mine > 0) {
+        mode = 'wait';
+        bar.innerHTML = '<div class="rq-txt"><b>' + tr('Waiting to be accepted', 'Menunggu diterima') + '</b><span>' + st.left + ' ' + tr(st.left === 1 ? 'message left' : 'messages left', 'pesan tersisa') + '</span></div>';
+      }
+    }
+    bar.style.display = mode ? 'flex' : 'none';
+    scr.classList.toggle('req-on', !!mode);
+    if (mode === 'recv' || mode === 'limit') { $('msg-field').style.display = 'none'; $('rec-field').style.display = 'none'; $('chat-action-btn').style.display = 'none'; }
+  }
+  const _rm = renderMessages;
+  renderMessages = function () { _rm(); drawReq(); };
+
+  const _rcl = renderChatsList;
+  renderChatsList = function () {
+    _rcl.apply(this, arguments);
+    try {
+      document.querySelectorAll('#chats-list-wrapper .chat-item').forEach(el => {
+        const m = (el.getAttribute('onclick') || '').match(/username: '([^']+)'/); if (!m) return;
+        if (reqState(m[1]).receiver) { const p = el.querySelector('.chat-last-msg'); if (p) p.innerHTML = '<b style="color:var(--accent-color)">' + tr('Message request', 'Permintaan pesan') + '</b> · ' + p.innerHTML; }
+      });
+    } catch (e) { console.warn(e); }
+  };
+
+  // ================= DETEKSI AKTIVITAS MENCURIGAKAN (hanya hitungan, isi pesan tidak dikirim) =================
+  function flag(kind, note) {
+    if (!currentUser || me() === DEV) return;
+    const k = 'orvexa_flag_' + kind, last = +localStorage.getItem(k) || 0;
+    if (Date.now() - last < 600000) return;
+    localStorage.setItem(k, String(Date.now()));
+    if (window.orvexaReport) window.orvexaReport({ reporter: me(), target: me(), targetUid: (userOf(me()) || {}).uid || '', reason: 'AUTO: ' + kind, note: note, ts: Date.now(), status: 'open' });
+  }
+  const sent = [], fresh = [], adds = [];
+  const prune = (a, ms) => { const n = Date.now(); while (a.length && n - a[0].t > ms) a.shift(); };
+  function track(text, newRoomUser) {
+    const n = Date.now(); sent.push({ t: n, x: text }); prune(sent, 60000);
+    if (sent.filter(m => n - m.t < 15000).length >= 10) flag('Message flood', sent.filter(m => n - m.t < 15000).length + ' messages in 15 seconds');
+    if (text && sent.filter(m => m.x === text).length >= 4) flag('Repeated message', sent.filter(m => m.x === text).length + ' identical messages in 1 minute');
+    if (newRoomUser) { fresh.push({ t: n, u: newRoomUser }); prune(fresh, 600000); const c = new Set(fresh.map(f => f.u)).size; if (c >= 6) flag('Mass messaging strangers', c + ' people messaged without being accepted in 10 minutes'); }
+  }
+
+  const _sr = window.sendRich;
+  window.sendRich = function (extra, target) {
+    const tu = target || (typeof isSystemChat !== 'undefined' && isSystemChat ? null : activeChatUser);
+    let st = null;
+    if (tu && tu.username && currentUser) {
+      st = reqState(tu.username);
+      if (st.limited) { say(tr('Message limit reached. Wait until your chat is accepted.', 'Batas pesan tercapai. Tunggu sampai chatmu diterima.')); return false; }
+    }
+    const ok = _sr.apply(this, arguments);
+    if (ok && st) {
+      if (st.receiver) acceptRoom(st.room);
+      if (me() !== DEV) track((extra && extra.text) || '', !st.accepted && st.mine === 0 ? tu.username : null);
+      if (typeof isSystemChat !== 'undefined' && !target) drawReq();
+    }
+    return ok;
+  };
+  const _au = window.addUserAndChat;
+  if (typeof _au === 'function') window.addUserAndChat = function (u) {
+    if (currentUser && !(G('friendsDb', {})[me()] || []).includes(u)) { adds.push({ t: Date.now() }); prune(adds, 300000); if (adds.length >= 8) flag('Mass adding contacts', adds.length + ' contacts added in 5 minutes'); }
+    return _au.apply(this, arguments);
+  };
+
+  // developer langsung diberi tahu saat ada laporan / deteksi baru
+  const _bu = window.bellUpdate;
+  window.bellUpdate = function () {
+    const r = _bu && _bu.apply(this, arguments);
+    try {
+      if (currentUser && me() === DEV) {
+        const seen = +localStorage.getItem('orvexa_reportSeen') || 0, fr = G('reports', []).filter(x => x.status === 'open' && x.ts > seen);
+        if (fr.length) { localStorage.setItem('orvexa_reportSeen', String(Math.max(...fr.map(x => x.ts)))); const au = fr.filter(x => String(x.reason).startsWith('AUTO')).length; say('⚠ ' + fr.length + ' new report(s)' + (au ? ' (' + au + ' auto-detected)' : '') + ' — Admin → Reports'); }
+      }
+    } catch (e) { console.warn(e); }
+    return r;
+  };
+
+  // ================= BAN =================
+  const TYPES = [['Spam', 'Spam', 'Spam'], ['Harassment', 'Harassment', 'Pelecehan'], ['Scam', 'Scam / fraud', 'Penipuan'], ['Inappropriate', 'Inappropriate content', 'Konten tidak pantas'], ['Suspicious', 'Suspicious activity', 'Aktivitas mencurigakan'], ['Terms', 'Terms violation', 'Pelanggaran ketentuan'], ['Other', 'Other', 'Lainnya']];
+  const typeLabel = k => { const t = TYPES.find(x => x[0] === k); return t ? (currentLang === 'id' ? t[2] : t[1]) : (k || '-'); };
+  const isBanned = u => !!u.banned && (!u.banUntil || u.banUntil > Date.now());
+  const fdt = ms => new Date(ms).toLocaleString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const left = ms => { let s = Math.max(0, Math.floor(ms / 1000)); const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60; const p = n => String(n).padStart(2, '0'); return (d ? d + (currentLang === 'id' ? ' hari ' : 'd ') : '') + p(h) + ':' + p(m) + ':' + p(s); };
+
+  let timer = null, was = false, shownFor = '';
+  function drawBan(u) {
+    $('ban-title').textContent = tr('Your account is restricted', 'Akunmu dibatasi');
+    $('ban-sub').textContent = tr('You can still sign in, but you can\'t use OrVexa until this restriction ends.', 'Kamu masih bisa masuk, tapi belum bisa memakai OrVexa sampai pembatasan ini berakhir.');
+    $('ban-out').textContent = tr('Log Out', 'Keluar');
+    const rows = [[tr('Violation', 'Pelanggaran'), esc(typeLabel(u.banReason))], [tr('Banned on', 'Dibanned pada'), u.banAt ? esc(fdt(u.banAt)) : '-'], [tr('Unbanned on', 'Dibuka pada'), u.banUntil ? esc(fdt(u.banUntil)) : esc(tr('Permanent', 'Permanen'))]];
+    let h = rows.map(r => '<div class="ban-row"><small>' + r[0] + '</small><span>' + r[1] + '</span></div>').join('');
+    if (u.banUntil) h += '<div class="ban-row left"><small>' + tr('Time remaining', 'Sisa waktu') + '</small><span id="ban-left"></span></div>';
+    if (u.banNote) h += '<div class="ban-row"><small>' + tr('Note', 'Catatan') + '</small><span>' + esc(u.banNote) + '</span></div>';
+    $('ban-card').innerHTML = h;
+  }
+  window.banCheck = function () {
+    const cu = currentUser, u = cu && (userOf(cu.username) || cu), on = !!u && u.username !== DEV && isBanned(u);
+    if (on) {
+      const key = [u.banReason, u.banAt, u.banUntil, u.banNote, currentLang].join('|');
+      if (key !== shownFor) { drawBan(u); shownFor = key; }
+      $('ban-screen').classList.add('active');
+      const el = $('ban-left'); if (el) el.textContent = left(u.banUntil - Date.now());
+      if (!timer) timer = setInterval(window.banCheck, 1000);
+    } else {
+      $('ban-screen').classList.remove('active'); shownFor = '';
+      if (timer) { clearInterval(timer); timer = null; }
+      if (was && cu) say(tr('Your restriction has ended. Welcome back!', 'Pembatasanmu sudah berakhir. Selamat datang kembali!'));
+    }
+    was = on;
+  };
+  $('ban-out').addEventListener('click', () => { window.handleLogOut(); $('ban-screen').classList.remove('active'); was = false; shownFor = ''; if (timer) { clearInterval(timer); timer = null; } });
+  setTimeout(window.banCheck, 0);
+
+  // ---- admin: modal ban ----
+  const PRESETS = [['1 hour', 1, 'h'], ['1 day', 1, 'd'], ['3 days', 3, 'd'], ['7 days', 7, 'd'], ['30 days', 30, 'd'], ['Permanent', 1, 'p']];
+  let bt = null, btype = 'Spam';
+  function drawBm(preset) {
+    $('bm-types').innerHTML = TYPES.map(t => '<button type="button" data-t="' + t[0] + '" class="' + (btype === t[0] ? 'on' : '') + '">' + t[1] + '</button>').join('');
+    $('bm-presets').innerHTML = PRESETS.map((p, i) => '<button type="button" data-p="' + i + '" class="' + (preset === i ? 'on' : '') + '">' + p[0] + '</button>').join('');
+  }
+  $('bm-types').addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (b) { btype = b.dataset.t; drawBm(+(($('bm-presets').querySelector('.on') || {}).dataset || {}).p); } });
+  $('bm-presets').addEventListener('click', e => { const b = e.target.closest('[data-p]'); if (!b) return; const p = PRESETS[+b.dataset.p]; $('bm-num').value = p[1]; $('bm-unit').value = p[2]; drawBm(+b.dataset.p); });
+  ['input', 'change'].forEach(ev => { $('bm-num').addEventListener(ev, () => drawBm(-1)); $('bm-unit').addEventListener(ev, () => drawBm(-1)); });
+  window.openBanModal = function (u) {
+    if (!currentUser || me() !== DEV || u === DEV) return;
+    bt = u; btype = 'Spam'; $('bm-user').textContent = '@' + u; $('bm-note').value = '';
+    $('bm-num').value = 1; $('bm-unit').value = 'd'; drawBm(1); $('ban-modal').classList.add('active');
+  };
+  window.confirmBan = function () {
+    if (!bt || me() !== DEV) return;
+    const unit = $('bm-unit').value, n = Math.max(1, Math.min(3650, parseInt($('bm-num').value, 10) || 1));
+    const until = unit === 'p' ? 0 : Date.now() + n * (unit === 'h' ? 3600000 : 86400000);
+    const list = G('users', []), x = list.find(y => y.username === bt); if (!x) return;
+    Object.assign(x, { banned: true, banReason: btype, banAt: Date.now(), banUntil: until, banNote: $('bm-note').value.trim().slice(0, 200) });
+    setStoredData('users', list);
+    G('reports', []).filter(r => r.target === bt && r.status === 'open').forEach(r => { if (window.orvexaReportOp) window.orvexaReportOp('done', r.id); });
+    $('ban-modal').classList.remove('active'); say('Banned @' + bt); bt = null;
+    if (window.admRender) window.admRender();
+  };
+})();
