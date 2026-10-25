@@ -40,7 +40,7 @@
         label_username: "Username",
         label_email: "Email",
         label_confirm_pass: "Confirm Password",
-        agree_terms: "I agree to Terms & Policy",
+        agree_terms: "I agree to the <u class=\"legal-link\" onclick=\"openLegal('terms', event)\">Terms of Use</u> & <u class=\"legal-link\" onclick=\"openLegal('privacy', event)\">Privacy Policy</u>",
         has_account: "Already have an account?",
         tab_chats: "Chats",
         tab_stories: "Stories",
@@ -76,6 +76,8 @@
         item_about: "About OrVexa",
         item_version: "Version",
         item_license: "Open Source License",
+        item_terms: "Terms of Use",
+        item_privacy: "Privacy Policy",
         btn_logout: "Log Out",
         chat_options: "Chat Options",
         opt_clear_chat: "Clear Chat",
@@ -119,7 +121,7 @@
         label_username: "Username",
         label_email: "Email",
         label_confirm_pass: "Konfirmasi Password",
-        agree_terms: "Saya menyetujui Syarat & Ketentuan",
+        agree_terms: "Saya menyetujui <u class=\"legal-link\" onclick=\"openLegal('terms', event)\">Syarat Penggunaan</u> & <u class=\"legal-link\" onclick=\"openLegal('privacy', event)\">Kebijakan Privasi</u>",
         has_account: "Sudah punya akun?",
         tab_chats: "Pesan",
         tab_stories: "Story",
@@ -155,6 +157,8 @@
         item_about: "Tentang OrVexa",
         item_version: "Versi",
         item_license: "Lisensi Open Source",
+        item_terms: "Syarat Penggunaan",
+        item_privacy: "Kebijakan Privasi",
         btn_logout: "Keluar",
         chat_options: "Opsi Chat",
         opt_clear_chat: "Bersihkan Chat",
@@ -1413,10 +1417,17 @@
   };
 
   const ACT = {
-    updPost() {
+    async updPost() {
       const t = $('adm-upd-title').value.trim(), b = $('adm-upd-body').value.trim();
       if (!t || !b) return alert('Title and message are required');
-      window.orvexaUpdateAdd({ title: t.slice(0, 80), body: b.slice(0, 1000), ts: Date.now(), author: currentUser.username }).then(ok => {
+      const src = ($('adm-upd-lang') || {}).value === 'en' ? 'en' : 'id', dst = src === 'id' ? 'en' : 'id';
+      const o = { title: t.slice(0, 80), body: b.slice(0, 1000), ts: Date.now(), author: currentUser.username, srcLang: src };
+      o['title_' + src] = o.title; o['body_' + src] = o.body;
+      if (window.toast) window.toast('Translating…');
+      const [tt, bt] = await Promise.all([autoTranslate(o.title, src, dst), autoTranslate(o.body, src, dst)]);
+      if (tt && bt) { o['title_' + dst] = tt.slice(0, 80); o['body_' + dst] = bt.slice(0, 1000); }
+      else if (window.toast) window.toast('Translation failed — published in the original language only');
+      window.orvexaUpdateAdd(o).then(ok => {
         if (!ok) return; const a = $('adm-upd-title'), c = $('adm-upd-body'); if (a) a.value = ''; if (c) c.value = '';
       });
     },
@@ -1604,6 +1615,7 @@
     },
     updatelog() {
       return `<div class="adm-card"><b>New Update</b>
+        <select id="adm-upd-lang" style="margin-top:8px;width:100%;padding:10px;border-radius:12px;background:var(--bg-input);border:1px solid var(--border-color);color:var(--text-main)"><option value="id">Written in: Indonesian (auto-translate to English)</option><option value="en">Written in: English (auto-translate to Indonesian)</option></select>
         <input type="text" id="adm-upd-title" placeholder="Title (e.g. v2.5.0)" maxlength="80" style="margin-top:8px">
         <textarea id="adm-upd-body" placeholder="What's new..." maxlength="1000"></textarea>
         ${btn('Publish', "admAct('updPost')")}</div><div id="adm-upd-list" style="display:flex;flex-direction:column;gap:12px">${updList()}</div>`;
@@ -1687,6 +1699,25 @@
   window.admLbReset = () => { lbEditId = null; $('adm-lb-text').value = ''; $('adm-lb-color').value = '#e5484d'; $('adm-lb-style').value = 'solid'; $('adm-lb-icon').value = 'code'; $('adm-lb-ttl').textContent = 'New label'; window.admLbPrev(); };
 
   // daftar update log dipisah supaya form tidak ikut terhapus setiap ada data masuk dari Firebase
+
+  // terjemahan otomatis (MyMemory, gratis, tanpa API key). Gagal -> null, update tetap terbit dalam bahasa aslinya.
+  async function autoTranslate(text, from, to) {
+    try {
+      const parts = [], lines = text.split('\n');
+      let cur = '';
+      lines.forEach(l => { if ((cur + '\n' + l).length > 450) { if (cur) parts.push(cur); cur = l.slice(0, 450); } else cur = cur ? cur + '\n' + l : l; });
+      if (cur) parts.push(cur);
+      const out = [];
+      for (const p of parts) {
+        const r = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(p) + '&langpair=' + from + '|' + to);
+        const j = await r.json();
+        const tx = j && j.responseData && j.responseData.translatedText;
+        if (!tx || /MYMEMORY WARNING|QUERY LENGTH LIMIT/i.test(tx)) return null;
+        out.push(tx);
+      }
+      return out.join('\n');
+    } catch (e) { console.warn('[OrVexa] translate', e); return null; }
+  }
   function updList() {
     return getStoredData('updatesDb', []).map(u => row('', esc(u.title), esc(u.body).slice(0, 140) + ' · ' + new Date(u.ts).toLocaleString(), btn('Delete', `admAct('updDel','${esc(u.id)}')`, 'red'))).join('') || '<p class="adm-muted">No updates yet.</p>';
   }
@@ -2766,9 +2797,10 @@
   const upd = () => G('updatesDb', []), seen = () => +localStorage.getItem('orvexa_updSeen') || 0;
   let since = 0;
 
+  const pick = (u, k) => u[k + '_' + currentLang] || u[k] || '';
   function drawNotif() {
     const a = upd();
-    $('nf-list').innerHTML = a.length ? a.map(u => `<div class="nf-card${u.ts > since ? ' new' : ''}"><div class="nf-head"><b>${esc(u.title)}</b><span>${new Date(u.ts).toLocaleDateString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</span></div><p>${esc(u.body).replace(/\n/g, '<br>')}</p></div>`).join('')
+    $('nf-list').innerHTML = a.length ? a.map(u => `<div class="nf-card${u.ts > since ? ' new' : ''}"><div class="nf-head"><b>${esc(pick(u, 'title'))}</b><span>${new Date(u.ts).toLocaleDateString(currentLang === 'id' ? 'id-ID' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</span></div><p>${esc(pick(u, 'body')).replace(/\n/g, '<br>')}</p></div>`).join('')
       : `<p class="nf-empty">${tr('No updates yet.', 'Belum ada update.')}</p>`;
   }
   window.bellUpdate = function () {
@@ -2995,7 +3027,7 @@
 /* ORVEXA: accept chat (batas 3 pesan), sistem ban baru, deteksi aktivitas mencurigakan */
 (function () {
   const $ = id => document.getElementById(id), G = getStoredData, tr = (en, idn) => currentLang === 'id' ? idn : en;
-  const DEV = 'risky.err', LIMIT = 3, me = () => currentUser && currentUser.username;
+  const DEV = 'risky.err', CS = 'cs.orvexa', LIMIT = 3, me = () => currentUser && currentUser.username;
   const userOf = n => G('users', []).find(x => x.username === n);
   const say = m => { if (window.toast) window.toast(m); };
   const chatTarget = () => (typeof activeChatUser !== 'undefined' && activeChatUser && !isSystemChat && activeChatUser.username) ? activeChatUser.username : null;
@@ -3004,6 +3036,7 @@
   function reqState(other) {
     const room = getChatRoomId(me(), other), list = G('chatsDb', {})[room] || [];
     const mine = list.filter(m => m.sender === me()).length, theirs = list.filter(m => m.sender === other).length;
+    if (other === CS || me() === CS) return { room, mine, theirs, accepted: true, receiver: false, limited: false, left: LIMIT }; // akun system: langsung bisa chat
     const accepted = !!G('acceptsDb', {})[room] || (mine > 0 && theirs > 0);
     return { room, mine, theirs, accepted, receiver: !accepted && theirs > 0 && mine === 0, limited: !accepted && mine >= LIMIT, left: Math.max(0, LIMIT - mine) };
   }
@@ -3086,7 +3119,7 @@
     const ok = _sr.apply(this, arguments);
     if (ok && st) {
       if (st.receiver) acceptRoom(st.room);
-      if (me() !== DEV) track((extra && extra.text) || '', !st.accepted && st.mine === 0 ? tu.username : null);
+      if (me() !== DEV) track((extra && extra.text) || '', !st.accepted && st.mine === 0 && !st.receiver ? tu.username : null);
       if (typeof isSystemChat !== 'undefined' && !target) drawReq();
     }
     return ok;
@@ -3172,4 +3205,48 @@
     $('ban-modal').classList.remove('active'); say('Banned @' + bt); bt = null;
     if (window.admRender) window.admRender();
   };
+})();
+
+/* ===== blok JS 13 ===== */
+/* ORVEXA: Syarat Penggunaan & Kebijakan Privasi + akun Customer Service */
+(function () {
+  const CS_USERNAME = 'cs.orvexa';
+  const $ = id => document.getElementById(id), idn = () => currentLang === 'id';
+  let from = 'signup-screen';
+
+  const _ss = showScreen;
+  showScreen = function (id) {
+    _ss(id);
+    if (id === 'terms-screen' || id === 'privacy-screen') $('main-bottom-nav').style.display = 'none';
+    if (id === 'terms-screen' || id === 'privacy-screen') window.scrollTo(0, 0);
+  };
+
+  window.openLegal = function (kind, ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    const cur = document.querySelector('.screen.active');
+    if (cur && cur.id !== 'terms-screen' && cur.id !== 'privacy-screen') from = cur.id;
+    showScreen(kind === 'privacy' ? 'privacy-screen' : 'terms-screen');
+  };
+  window.closeLegal = function () { showScreen(from || 'signup-screen'); };
+
+  window.openCS = function () {
+    if (!currentUser) { window.toast(idn() ? 'Masuk dulu untuk menghubungi Customer Service' : 'Sign in first to contact Customer Service'); return; }
+    if (currentUser.username === CS_USERNAME) { window.toast(idn() ? 'Ini akun Customer Service' : 'This is the Customer Service account'); return; }
+    const cs = getStoredData('users', []).find(u => String(u.username || '').toLowerCase() === CS_USERNAME);
+    if (!cs) { window.toast(idn() ? 'Akun Customer Service (cs.orvexa) belum ditemukan' : 'Customer Service account (cs.orvexa) was not found'); return; }
+    try {
+      const f = getStoredData('friendsDb', {}), mine = f[currentUser.username] || (f[currentUser.username] = []);
+      if (!mine.includes(cs.username)) { mine.push(cs.username); setStoredData('friendsDb', f); }
+      openChat({ username: cs.username, name: cs.name, avatar: cs.avatar, isOnline: !!cs.isOnline }, false);
+    } catch (e) {
+      console.error('[OrVexa] openCS', e);
+      window.toast(idn() ? 'Gagal membuka chat Customer Service' : 'Could not open Customer Service chat');
+    }
+  };
+
+  // halaman legal mengikuti bahasa aplikasi (CSS memilih blok .lg-id / .lg-en lewat atribut lang)
+  const syncLang = () => document.documentElement.setAttribute('lang', currentLang === 'id' ? 'id' : 'en');
+  const _al = applyLanguage;
+  applyLanguage = function (l) { _al.apply(this, arguments); syncLang(); };
+  syncLang();
 })();
